@@ -3,15 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>家庭記帳與資產管理</title>
+    <title>家庭記帳 PWA (自定義版)</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     <style>
-        /* 為了讓 iOS 使用起來更有 App 的感覺 */
         body { -webkit-tap-highlight-color: transparent; background-color: #f3f4f6; }
         .app-container { max-width: 600px; margin: 0 auto; background: white; min-height: 100vh; box-shadow: 0 0 15px rgba(0,0,0,0.1); }
+        /* 隱藏捲軸但保留功能 */
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
 </head>
 <body>
@@ -23,36 +25,40 @@
         <button @click="exportCSV" class="text-xs bg-green-600 px-2 py-1 rounded hover:bg-green-500">匯出 CSV</button>
     </header>
 
-    <div class="p-4 bg-slate-800 text-white rounded-b-3xl shadow-lg mb-4">
+    <div v-if="currentTab !== 'settings'" class="p-4 bg-slate-800 text-white rounded-b-3xl shadow-lg mb-4 transition-all">
         <div class="text-slate-400 text-sm">目前總資產</div>
         <div class="text-4xl font-bold my-2">{{ formatMoney(totalAssets) }}</div>
-        <div class="flex gap-2 mt-4 overflow-x-auto pb-2">
-            <div v-for="(balance, acc) in accountBalances" :key="acc" class="bg-slate-700 px-3 py-2 rounded-lg min-w-[120px]">
-                <div class="text-xs text-slate-300">{{ acc }}</div>
+        <div class="flex gap-2 mt-4 overflow-x-auto pb-2 no-scrollbar">
+            <div v-for="(balance, acc) in accountBalances" :key="acc" class="bg-slate-700 px-3 py-2 rounded-lg min-w-[120px] flex-shrink-0">
+                <div class="text-xs text-slate-300 truncate">{{ acc }}</div>
                 <div class="font-semibold" :class="balance < 0 ? 'text-red-400' : 'text-green-400'">{{ formatMoney(balance) }}</div>
             </div>
         </div>
     </div>
 
-    <div class="flex justify-center gap-4 mb-4 px-4">
-        <button @click="currentTab = 'list'" :class="currentTab === 'list' ? 'bg-slate-800 text-white' : 'bg-gray-200 text-gray-600'" class="flex-1 py-2 rounded-lg font-bold transition">交易列表</button>
-        <button @click="currentTab = 'add'" :class="currentTab === 'add' ? 'bg-slate-800 text-white' : 'bg-gray-200 text-gray-600'" class="flex-1 py-2 rounded-lg font-bold transition">新增記帳</button>
-        <button @click="currentTab = 'chart'" :class="currentTab === 'chart' ? 'bg-slate-800 text-white' : 'bg-gray-200 text-gray-600'" class="flex-1 py-2 rounded-lg font-bold transition">統計圖表</button>
+    <div class="flex justify-center gap-2 mb-4 px-4">
+        <button @click="currentTab = 'list'" :class="currentTab === 'list' ? 'bg-slate-800 text-white' : 'bg-gray-200 text-gray-600'" class="flex-1 py-2 rounded-lg font-bold text-sm transition">列表</button>
+        <button @click="currentTab = 'add'" :class="currentTab === 'add' ? 'bg-slate-800 text-white' : 'bg-gray-200 text-gray-600'" class="flex-1 py-2 rounded-lg font-bold text-sm transition">記一筆</button>
+        <button @click="currentTab = 'chart'" :class="currentTab === 'chart' ? 'bg-slate-800 text-white' : 'bg-gray-200 text-gray-600'" class="flex-1 py-2 rounded-lg font-bold text-sm transition">報表</button>
+        <button @click="currentTab = 'settings'" :class="currentTab === 'settings' ? 'bg-slate-800 text-white' : 'bg-gray-200 text-gray-600'" class="flex-1 py-2 rounded-lg font-bold text-sm transition">設定</button>
     </div>
 
     <div v-if="currentTab === 'list'" class="flex-1 overflow-y-auto px-4 pb-20">
+        <div v-if="transactions.length === 0" class="text-center text-gray-400 mt-10">
+            目前沒有資料，快去記一筆吧！
+        </div>
         <div v-for="(tx, index) in sortedTransactions" :key="index" class="bg-white border-b border-gray-100 py-3 flex items-center justify-between">
             <div class="flex items-center gap-3">
-                <div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold"
+                <div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm flex-shrink-0"
                      :class="getCategoryColor(tx.category)">
                     {{ tx.category.substring(0,1) }}
                 </div>
-                <div>
-                    <div class="font-bold text-gray-800">{{ tx.note || tx.category }}</div>
-                    <div class="text-xs text-gray-500">{{ tx.date }} • {{ tx.user }} • {{ tx.account }}</div>
+                <div class="overflow-hidden">
+                    <div class="font-bold text-gray-800 truncate">{{ tx.note || tx.category }}</div>
+                    <div class="text-xs text-gray-500 truncate">{{ tx.date }} • {{ tx.user }} • {{ tx.account }}</div>
                 </div>
             </div>
-            <div class="text-right">
+            <div class="text-right flex-shrink-0 ml-2">
                 <div class="font-bold text-lg" :class="tx.amount >= 0 ? 'text-green-600' : 'text-red-600'">
                     {{ formatMoney(tx.amount) }}
                 </div>
@@ -62,7 +68,7 @@
     </div>
 
     <div v-if="currentTab === 'add'" class="px-6 pb-20">
-        <h2 class="text-xl font-bold mb-4 text-gray-700">新增一筆交易</h2>
+        <h2 class="text-xl font-bold mb-4 text-gray-700">新增交易</h2>
         
         <div class="space-y-4">
             <div>
@@ -74,202 +80,4 @@
                 <div>
                     <label class="block text-sm text-gray-600 mb-1">使用者</label>
                     <select v-model="newTx.user" class="w-full p-3 border rounded-lg bg-white">
-                        <option v-for="u in options.users" :value="u">{{ u }}</option>
-                    </select>
-                </div>
-                <div>
-                    <label class="block text-sm text-gray-600 mb-1">帳戶</label>
-                    <select v-model="newTx.account" class="w-full p-3 border rounded-lg bg-white">
-                        <option v-for="a in options.accounts" :value="a">{{ a }}</option>
-                    </select>
-                </div>
-            </div>
-
-            <div>
-                <label class="block text-sm text-gray-600 mb-1">交易類別</label>
-                <select v-model="newTx.category" class="w-full p-3 border rounded-lg bg-white">
-                    <option v-for="c in options.categories" :value="c">{{ c }}</option>
-                </select>
-            </div>
-
-            <div>
-                <label class="block text-sm text-gray-600 mb-1">金額 (正數收入/轉入，負數支出/轉出)</label>
-                <input type="number" v-model.number="newTx.amount" class="w-full p-3 border rounded-lg bg-white text-xl" placeholder="-100">
-            </div>
-
-            <div>
-                <label class="block text-sm text-gray-600 mb-1">備註說明</label>
-                <input type="text" v-model="newTx.note" class="w-full p-3 border rounded-lg bg-white" placeholder="例如：吃午餐">
-            </div>
-
-            <button @click="addTransaction" class="w-full bg-slate-800 text-white py-4 rounded-lg text-lg font-bold shadow-lg mt-4 active:bg-slate-900">
-                確認儲存
-            </button>
-        </div>
-    </div>
-
-    <div v-show="currentTab === 'chart'" class="px-4 pb-20 pt-4">
-        <div class="bg-white p-4 rounded-xl shadow mb-4">
-            <h3 class="font-bold text-gray-700 mb-4 text-center">資產分佈 (帳戶餘額)</h3>
-            <canvas id="assetChart"></canvas>
-        </div>
-        <div class="text-center text-sm text-gray-500">更多報表功能可持續擴充</div>
-    </div>
-
-</div>
-
-<script>
-    const { createApp } = Vue;
-
-    createApp({
-        data() {
-            return {
-                currentTab: 'list',
-                // 選單選項
-                options: {
-                    users: ['lowson', 'wife', 'child'],
-                    accounts: ['現金', '中信薪轉帳戶', '彰銀房貸帳戶', '富邦cube信用卡'],
-                    categories: ['餐飲支出', '薪資獎金', '提款轉帳', '水電瓦斯', '繳信用卡費', '其他']
-                },
-                // 初始資料 (來自你的圖片)
-                transactions: [
-                    { date: '2025-11-05', user: 'lowson', account: '現金', category: '餐飲支出', amount: -100, note: '吃上飽' },
-                    { date: '2025-11-03', user: 'lowson', account: '中信薪轉帳戶', category: '薪資獎金', amount: 200000, note: '10月薪資' },
-                    { date: '2025-11-10', user: 'lowson', account: '中信薪轉帳戶', category: '提款轉帳', amount: -10000, note: '轉帳到彰銀房貸帳戶' },
-                    { date: '2025-11-14', user: 'lowson', account: '彰銀房貸帳戶', category: '提款轉帳', amount: 10000, note: '中信薪轉帳戶轉入' },
-                    { date: '2025-11-14', user: 'lowson', account: '富邦cube信用卡', category: '餐飲支出', amount: -30, note: '711飲料' },
-                    { date: '2025-11-13', user: 'lowson', account: '富邦cube信用卡', category: '水電瓦斯', amount: -7000, note: '9/10月電費' },
-                    { date: '2025-11-14', user: 'lowson', account: '中信薪轉帳戶', category: '繳信用卡費', amount: -7030, note: '10月富邦cube信用卡費' },
-                    { date: '2025-11-14', user: 'lowson', account: '富邦cube信用卡', category: '繳信用卡費', amount: 7030, note: '10月富邦cube信用卡費' },
-                    { date: '2025-11-12', user: 'lowson', account: '現金', category: '提款轉帳', amount: 5000, note: '中信薪轉帳戶提款' },
-                    { date: '2025-11-12', user: 'lowson', account: '中信薪轉帳戶', category: '提款轉帳', amount: -5000, note: '中信薪轉帳戶提款' }
-                ],
-                // 新增用的暫存物件
-                newTx: {
-                    date: new Date().toISOString().split('T')[0],
-                    user: 'lowson',
-                    account: '現金',
-                    category: '餐飲支出',
-                    amount: null,
-                    note: ''
-                },
-                chartInstance: null
-            }
-        },
-        computed: {
-            sortedTransactions() {
-                // 依照日期排序 (新 -> 舊)
-                return [...this.transactions].sort((a, b) => new Date(b.date) - new Date(a.date));
-            },
-            totalAssets() {
-                return this.transactions.reduce((sum, t) => sum + t.amount, 0);
-            },
-            accountBalances() {
-                const bals = {};
-                this.transactions.forEach(t => {
-                    bals[t.account] = (bals[t.account] || 0) + t.amount;
-                });
-                return bals;
-            }
-        },
-        mounted() {
-            // 1. 從 localStorage 讀取舊資料 (如果有)
-            const saved = localStorage.getItem('accounting_data');
-            if (saved) {
-                this.transactions = JSON.parse(saved);
-            }
-            
-            // 2. 初始化圖表
-            this.renderChart();
-        },
-        watch: {
-            // 當資料變動時，自動存檔並更新圖表
-            transactions: {
-                deep: true,
-                handler() {
-                    localStorage.setItem('accounting_data', JSON.stringify(this.transactions));
-                    this.renderChart();
-                }
-            },
-            currentTab(val) {
-                if (val === 'chart') {
-                    // 切換到圖表頁籤時重新渲染，避免寬度跑掉
-                    this.$nextTick(() => this.renderChart());
-                }
-            }
-        },
-        methods: {
-            formatMoney(val) {
-                return '$' + val.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-            },
-            addTransaction() {
-                if (!this.newTx.amount) return alert('請輸入金額');
-                
-                // 複製一份新資料加入列表
-                this.transactions.push({ ...this.newTx });
-                
-                // 重置表單金額與備註，其他保留方便連續記帳
-                this.newTx.amount = null;
-                this.newTx.note = '';
-                
-                alert('記帳成功！');
-                this.currentTab = 'list';
-            },
-            deleteTransaction(index) {
-                if (confirm('確定要刪除這筆紀錄嗎？')) {
-                    // 因為 sortedTransactions 是 computed，我們需要找到原始陣列的 index 刪除
-                    // 這裡簡化邏輯，直接刪除對應物件 (如果不重複的話)
-                    // 更好的做法是給每個交易一個 ID，這裡先用簡單做法：
-                    const txToDelete = this.sortedTransactions[index];
-                    const originalIndex = this.transactions.indexOf(txToDelete);
-                    if(originalIndex > -1) this.transactions.splice(originalIndex, 1);
-                }
-            },
-            getCategoryColor(cat) {
-                if (cat.includes('支出') || cat.includes('費') || cat.includes('水電')) return 'bg-red-400';
-                if (cat.includes('薪資') || cat.includes('收入')) return 'bg-green-500';
-                return 'bg-blue-400'; // 轉帳
-            },
-            exportCSV() {
-                let csvContent = "data:text/csv;charset=utf-8,\uFEFF"; // 加入 BOM 解決中文亂碼
-                csvContent += "日期,使用者,帳戶,類別,金額,備註\n";
-                
-                this.transactions.forEach(row => {
-                    csvContent += `${row.date},${row.user},${row.account},${row.category},${row.amount},${row.note}\n`;
-                });
-                
-                const encodedUri = encodeURI(csvContent);
-                const link = document.createElement("a");
-                link.setAttribute("href", encodedUri);
-                link.setAttribute("download", "記帳備份.csv");
-                document.body.appendChild(link);
-                link.click();
-            },
-            renderChart() {
-                const ctx = document.getElementById('assetChart');
-                if (!ctx) return;
-
-                // 準備資料
-                const labels = Object.keys(this.accountBalances);
-                const data = Object.values(this.accountBalances);
-                const colors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#6366f1'];
-
-                if (this.chartInstance) this.chartInstance.destroy();
-
-                this.chartInstance = new Chart(ctx, {
-                    type: 'doughnut',
-                    data: {
-                        labels: labels,
-                        datasets: [{
-                            data: data,
-                            backgroundColor: colors,
-                            hoverOffset: 4
-                        }]
-                    }
-                });
-            }
-        }
-    });
-</script>
-</body>
-</html>
+                        <option v-for="u in options.users" :value="u">{{ u }}</
