@@ -201,7 +201,6 @@
                     } else if (data.transactions) {
                         if (data.transactions.length > 0) setTransactions(data.transactions);
                         if (data.prices && Object.keys(data.prices).length > 0) setAssetPrices(data.prices);
-                        // 將 Google Sheet 中的資產名稱加入選單
                         if (data.assetOptions && Array.isArray(data.assetOptions)) {
                             setOptions(prev => {
                                 const newAssets = Array.from(new Set([...prev.assets, ...data.assetOptions]));
@@ -260,7 +259,6 @@
 
                 const filteredTransactions = dashboardUser === '所有使用者' ? transactions : transactions.filter(t => t.user === dashboardUser);
 
-                // 根據歷史交易計算庫存與收支
                 [...filteredTransactions].reverse().forEach(tx => {
                     const month = tx.date.slice(0, 7);
                     if (tx.type === '收入') {
@@ -274,7 +272,6 @@
                         balances[tx.toAccount] = (balances[tx.toAccount] || 0) + tx.amount;
                     } else if (tx.type === '資產投資') {
                         balances[tx.account] = (balances[tx.account] || 0) - tx.amount;
-                        // 更新資產庫存 (簡單累加，若有賣出需另處理)
                         if(!assets[tx.assetName]) assets[tx.assetName] = { qty: 0, cost: 0 };
                         assets[tx.assetName].qty += tx.assetQty;
                         assets[tx.assetName].cost += tx.amount;
@@ -289,7 +286,6 @@
                     if (tx.type === '資產投資') monthlyTrend[month].assets += tx.amount;
                 });
 
-                // 結合 Google Sheet 同步下來的現價
                 const assetReport = Object.keys(assets).map(name => {
                     const { qty, cost } = assets[name];
                     const currentPrice = assetPrices[name] !== undefined ? assetPrices[name] : 10;
@@ -386,7 +382,7 @@
                         {formData.type === '收入' && (<><DynamicSelect label="存入帳戶" value={formData.account} onChange={v => setFormData({...formData, account: v})} options={options.accounts} onAddOption={v => handleAddOption('accounts', v)} title="帳戶"/><DynamicSelect label="收入類別" value={formData.category} onChange={v => setFormData({...formData, category: v})} options={options.incomeCategories} onAddOption={v => handleAddOption('incomeCategories', v)} title="收入類別"/></>)}
                         {(formData.type === '支出' || (!['收入','提款轉帳','資產投資'].includes(formData.type))) && (<><DynamicSelect label="支出帳戶" value={formData.account} onChange={v => setFormData({...formData, account: v})} options={options.accounts} onAddOption={v => handleAddOption('accounts', v)} title="帳戶"/><DynamicSelect label="支出類別" value={formData.category} onChange={v => setFormData({...formData, category: v})} options={options.expenseCategories} onAddOption={v => handleAddOption('expenseCategories', v)} title="支出類別"/></>)}
                         {formData.type === '提款轉帳' && (<><div className="flex items-center gap-2"><div className="flex-1"><DynamicSelect label="轉出帳戶" value={formData.account} onChange={v => setFormData({...formData, account: v})} options={options.accounts} onAddOption={v => handleAddOption('accounts', v)} title="帳戶"/></div><Icons.ArrowRightLeft className="mt-4 text-gray-400" /><div className="flex-1"><DynamicSelect label="轉入帳戶" value={formData.toAccount} onChange={v => setFormData({...formData, toAccount: v})} options={options.accounts} onAddOption={v => handleAddOption('accounts', v)} title="帳戶"/></div></div><DynamicSelect label="轉帳類別" value={formData.category} onChange={v => setFormData({...formData, category: v})} options={options.transferCategories} onAddOption={v => handleAddOption('transferCategories', v)} title="轉帳類別"/></>)}
-                        {formData.type === '資產投資' && (<><DynamicSelect label="扣款帳戶" value={formData.account} onChange={v => setFormData({...formData, account: v})} options={options.accounts} onAddOption={v => handleAddOption('accounts', v)} title="帳戶"/><DynamicSelect label="資產代號/名稱" value={formData.assetName} onChange={v => setFormData({...formData, assetName: v})} options={options.assets} onAddOption={v => handleAddOption('assets', v)} title="資產"/><div className="grid grid-cols-2 gap-4"><div><label className="block text-sm font-medium text-gray-700 mb-1">數量</label><input type="number" value={formData.assetQty} onChange={e => setFormData({...formData, assetQty: e.target.value})} className="w-full p-2 border rounded-md" placeholder="股數"/></div><div><label className="block text-sm font-medium text-gray-700 mb-1">單價</label><input type="number" value={formData.assetPrice} onChange={e => setFormData({...formData, assetPrice: e.target.value})} className="w-full p-2 border rounded-md" placeholder="價格"/></div></div></>)}
+                        {formData.type === '資產投資' && (<><DynamicSelect label="資產帳戶" value={formData.account} onChange={v => setFormData({...formData, account: v})} options={options.accounts} onAddOption={v => handleAddOption('accounts', v)} title="資產帳戶"/><DynamicSelect label="資產代號/名稱" value={formData.assetName} onChange={v => setFormData({...formData, assetName: v})} options={options.assets} onAddOption={v => handleAddOption('assets', v)} title="資產"/><div className="grid grid-cols-2 gap-4"><div><label className="block text-sm font-medium text-gray-700 mb-1">數量</label><input type="number" value={formData.assetQty} onChange={e => setFormData({...formData, assetQty: e.target.value})} className="w-full p-2 border rounded-md" placeholder="股數"/></div><div><label className="block text-sm font-medium text-gray-700 mb-1">單價</label><input type="number" value={formData.assetPrice} onChange={e => setFormData({...formData, assetPrice: e.target.value})} className="w-full p-2 border rounded-md" placeholder="價格"/></div></div></>)}
 
                         <div><label className="block text-sm font-medium text-gray-700 mb-1">金額</label><div className="relative"><span className="absolute left-3 top-2 text-gray-500">$</span><input type="number" value={formData.amount} onChange={e => setFormData({...formData, amount: e.target.value})} className="w-full p-2 pl-7 border border-gray-300 rounded-md text-lg font-semibold text-blue-900" placeholder="0" required /></div></div>
                         <div><label className="block text-sm font-medium text-gray-700 mb-1">備註</label><textarea value={formData.note} onChange={e => setFormData({...formData, note: e.target.value})} className="w-full p-2 border border-gray-300 rounded-md" rows="2" placeholder="說明..." /></div>
