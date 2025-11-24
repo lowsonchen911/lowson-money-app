@@ -1,675 +1,452 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, LineChart, Line 
-} from 'recharts';
-import { 
-  Plus, Minus, ArrowRightLeft, TrendingUp, Wallet, Settings, 
-  Save, Download, Upload, RefreshCw, Trash2, PlusCircle, Check, Loader
-} from 'lucide-react';
-
-// --- 常數與預設資料 ---
-
-const DEFAULT_OPTIONS = {
-  users: ['Wisdom', 'Lowson'],
-  accounts: ['現金', '中信薪轉帳戶', '彰銀房貸帳戶', '永豐股票帳戶', '凱基債劵帳戶', '永豐債劵帳戶'],
-  incomeCategories: ['薪資獎金', '股票股利', '債卷配息', '其他收入'],
-  expenseCategories: ['餐飲支出', '水電瓦斯', '生活用品', '休閒旅遊', '醫療保險', '交通通勤'],
-  transferCategories: ['提款', '轉帳', '繳卡費', '繳貸款'],
-  assets: ['00937B', '00945B', '00953B', '00981B', '0050'],
-};
-
-const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d', '#ffc658'];
-
-// --- 工具函數 ---
-
-const formatCurrency = (val) => new Intl.NumberFormat('zh-TW', { style: 'currency', currency: 'TWD', minimumFractionDigits: 0 }).format(val);
-
-// --- 元件：新增選項 Modal ---
-const AddOptionModal = ({ isOpen, onClose, title, onAdd }) => {
-  const [newValue, setNewValue] = useState('');
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white p-6 rounded-lg shadow-xl w-80">
-        <h3 className="text-lg font-bold mb-4">新增{title}</h3>
-        <input 
-          type="text" 
-          value={newValue} 
-          onChange={(e) => setNewValue(e.target.value)}
-          className="w-full border p-2 rounded mb-4"
-          placeholder={`輸入新${title}`}
-          autoFocus
-        />
-        <div className="flex justify-end gap-2">
-          <button onClick={onClose} className="px-4 py-2 text-gray-600">取消</button>
-          <button 
-            onClick={() => { if(newValue) { onAdd(newValue); setNewValue(''); onClose(); }}} 
-            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-          >
-            新增
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// --- 元件：帶有新增功能的 Select ---
-const DynamicSelect = ({ label, value, onChange, options, onAddOption, title }) => {
-  const [isModalOpen, setIsModalOpen] = useState(false);
-
-  return (
-    <div className="mb-4">
-      <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
-      <div className="flex gap-2">
-        <select 
-          value={value} 
-          onChange={(e) => onChange(e.target.value)}
-          className="flex-1 p-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
-        >
-          {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-        </select>
-        <button 
-          onClick={() => setIsModalOpen(true)}
-          className="p-2 bg-gray-100 text-gray-600 rounded-md hover:bg-gray-200"
-          title="新增選項"
-        >
-          <PlusCircle size={20} />
-        </button>
-      </div>
-      <AddOptionModal 
-        isOpen={isModalOpen} 
-        onClose={() => setIsModalOpen(false)} 
-        title={title}
-        onAdd={onAddOption} 
-      />
-    </div>
-  );
-};
-
-// --- 主應用程式 ---
-
-export default function App() {
-  // --- State: 資料與設定 ---
-  const [activeTab, setActiveTab] = useState('dashboard');
-  const [transactions, setTransactions] = useState([]);
-  const [options, setOptions] = useState(DEFAULT_OPTIONS);
-  const [loading, setLoading] = useState(false);
-  const [apiUrl, setApiUrl] = useState(''); // Google Apps Script URL
-  const [isSyncing, setIsSyncing] = useState(false);
-  
-  // --- State: 記帳表單 ---
-  const [formData, setFormData] = useState({
-    user: 'Wisdom',
-    type: '支出',
-    account: '',
-    toAccount: '',
-    category: '',
-    assetName: '',
-    assetQty: '',
-    assetPrice: '',
-    amount: '',
-    note: ''
-  });
-
-  // --- 初始化與本地儲存 ---
-  useEffect(() => {
-    const savedTx = localStorage.getItem('pwa_transactions');
-    if (savedTx) setTransactions(JSON.parse(savedTx));
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>SmartLedger 記帳 App</title>
     
-    const savedOptions = localStorage.getItem('pwa_options');
-    if (savedOptions) setOptions(JSON.parse(savedOptions));
-    
-    const savedUrl = localStorage.getItem('pwa_api_url');
-    if (savedUrl) {
-      setApiUrl(savedUrl);
-      // 如果有 URL，啟動時嘗試同步一次
-      // 延遲一點執行以免 UI 卡頓
-      setTimeout(() => fetchFromGoogleSheet(savedUrl), 1000);
-    }
-  }, []);
+    <!-- PWA 相關設定 -->
+    <meta name="theme-color" content="#2563eb">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/2382/2382533.png">
+    <link rel="icon" type="image/png" href="https://cdn-icons-png.flaticon.com/512/2382/2382533.png">
 
-  useEffect(() => {
-    localStorage.setItem('pwa_transactions', JSON.stringify(transactions));
-    localStorage.setItem('pwa_options', JSON.stringify(options));
-    localStorage.setItem('pwa_api_url', apiUrl);
-  }, [transactions, options, apiUrl]);
+    <!-- 載入核心函式庫 (CDN) - 穩定版 -->
+    <script src="https://unpkg.com/react@18.2.0/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/prop-types/prop-types.min.js"></script>
+    <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
 
-  // --- 關鍵修改：從 Google Sheet 同步資料 (GET) ---
-  const fetchFromGoogleSheet = async (url) => {
-    const targetUrl = url || apiUrl;
-    if (!targetUrl) return;
-
-    setIsSyncing(true);
-    try {
-      const response = await fetch(targetUrl);
-      if (!response.ok) throw new Error('Network response was not ok');
-      
-      const data = await response.json();
-      
-      // 簡單策略：以雲端資料為準 (Source of Truth)
-      // 如果雲端有資料，就覆蓋本地
-      if (Array.isArray(data) && data.length > 0) {
-        setTransactions(data);
-        console.log("已從 Google Sheet 同步", data.length, "筆資料");
-      } else {
-        console.log("雲端無資料或格式錯誤");
-      }
-    } catch (error) {
-      console.error("同步失敗:", error);
-      // 這裡不跳 alert 避免干擾使用者體驗，只在 console 顯示
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
-  // --- 表單邏輯 ---
-  
-  useEffect(() => {
-    const newForm = { ...formData };
-    if (formData.type === '收入') {
-      newForm.category = options.incomeCategories[0];
-      newForm.account = options.accounts[0];
-    } else if (formData.type === '支出') {
-      newForm.category = options.expenseCategories[0];
-      newForm.account = options.accounts[0];
-    } else if (formData.type === '提款轉帳') {
-      newForm.account = options.accounts[1]; 
-      newForm.toAccount = options.accounts[0]; 
-      newForm.category = options.transferCategories[0];
-    } else if (formData.type === '資產投資') {
-      newForm.account = '凱基債劵帳戶';
-      newForm.assetName = '00981B';
-      newForm.category = '投資買入'; 
-    }
-    setFormData(newForm);
-  }, [formData.type]);
-
-  useEffect(() => {
-    if (formData.type === '資產投資' && formData.assetQty && formData.assetPrice) {
-      setFormData(prev => ({ ...prev, amount: Math.floor(prev.assetQty * prev.assetPrice) }));
-    }
-  }, [formData.assetQty, formData.assetPrice]);
-
-  const handleAddOption = (key, value) => {
-    setOptions(prev => ({
-      ...prev,
-      [key]: [...prev[key], value]
-    }));
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    const newTx = {
-      id: Date.now(),
-      date: new Date().toISOString().split('T')[0],
-      timestamp: new Date().toISOString(),
-      ...formData,
-      amount: Number(formData.amount),
-      assetQty: formData.assetQty ? Number(formData.assetQty) : '',
-      assetPrice: formData.assetPrice ? Number(formData.assetPrice) : '',
-    };
-
-    // 先更新本地 UI，讓使用者覺得很快
-    const updatedTransactions = [newTx, ...transactions];
-    setTransactions(updatedTransactions);
-    
-    // 重置表單
-    setFormData(prev => ({ ...prev, amount: '', note: '', assetQty: '', assetPrice: '' }));
-
-    if (apiUrl) {
-      setIsSyncing(true);
-      try {
-        // 1. 發送資料 (POST)
-        await fetch(apiUrl, {
-          method: 'POST',
-          mode: 'no-cors', 
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newTx)
-        });
-        
-        // 2. 為了確保資料一致，POST 後等待 1 秒再重新拉取最新資料
-        // (因為 Google Sheet 寫入可能有一點延遲)
-        setTimeout(() => fetchFromGoogleSheet(apiUrl), 1500);
-        
-      } catch (error) {
-        console.error("Sync failed", error);
-        alert("同步到 Google 試算表失敗，但已儲存於本機");
-        setIsSyncing(false);
-      }
-    } else {
-      alert('記帳成功！(僅儲存於本機，請設定 API URL 以啟用雲端同步)');
-    }
-  };
-
-  // --- 資料處理與統計邏輯 ---
-
-  const stats = useMemo(() => {
-    const currentMonth = new Date().toISOString().slice(0, 7); 
-    
-    let income = 0;
-    let expense = 0;
-    let balances = {};
-    let assets = {};
-    let categoryStats = {};
-    let monthlyTrend = {};
-
-    options.accounts.forEach(acc => balances[acc] = 0);
-    options.assets.forEach(ast => assets[ast] = { qty: 0, cost: 0 });
-
-    transactions.forEach(tx => {
-      const month = tx.date.slice(0, 7);
-      
-      if (tx.type === '收入') {
-        balances[tx.account] = (balances[tx.account] || 0) + tx.amount;
-        if (month === currentMonth) income += tx.amount;
-      } else if (tx.type === '支出') {
-        balances[tx.account] = (balances[tx.account] || 0) - tx.amount;
-        if (month === currentMonth) {
-          expense += tx.amount;
-          categoryStats[tx.category] = (categoryStats[tx.category] || 0) + tx.amount;
-        }
-      } else if (tx.type === '提款轉帳') {
-        balances[tx.account] = (balances[tx.account] || 0) - tx.amount;
-        balances[tx.toAccount] = (balances[tx.toAccount] || 0) + tx.amount;
-      } else if (tx.type === '資產投資') {
-        balances[tx.account] = (balances[tx.account] || 0) - tx.amount;
-        if (!assets[tx.assetName]) assets[tx.assetName] = { qty: 0, cost: 0 };
-        assets[tx.assetName].qty += tx.assetQty;
-        assets[tx.assetName].cost += tx.amount;
-      }
-
-      if (!monthlyTrend[month]) monthlyTrend[month] = { name: month, income: 0, expense: 0, assets: 0 };
-      if (tx.type === '收入') monthlyTrend[month].income += tx.amount;
-      if (tx.type === '支出') monthlyTrend[month].expense += tx.amount;
-      if (tx.type === '資產投資') monthlyTrend[month].assets += tx.amount;
-    });
-
-    const MOCK_PRICES = {
-      '00937B': 15.8, '00945B': 10.2, '00953B': 9.8, '00981B': 10.5, '0050': 150.2
-    };
-
-    const assetReport = Object.keys(assets).map(name => {
-      const { qty, cost } = assets[name];
-      const currentPrice = MOCK_PRICES[name] || 10; 
-      const value = qty * currentPrice;
-      const profit = value - cost;
-      const profitRate = cost > 0 ? (profit / cost) * 100 : 0;
-      return { name, qty, cost, value, profit, profitRate };
-    }).filter(a => a.qty > 0);
-
-    const categoryData = Object.keys(categoryStats).map(key => ({
-      name: key, value: categoryStats[key]
-    }));
-
-    const trendData = Object.values(monthlyTrend).sort((a,b) => a.name.localeCompare(b.name));
-
-    return { income, expense, balances, assetReport, categoryData, trendData };
-  }, [transactions, options]);
-
-  const downloadCSV = () => {
-    const headers = ["日期", "使用者", "交易方式", "轉出帳戶", "轉入帳戶", "交易類別", "資產名稱", "數量", "單價", "金額", "備註"];
-    const csvContent = "data:text/csv;charset=utf-8,\uFEFF" 
-      + headers.join(",") + "\n"
-      + transactions.map(row => {
-          return [
-            row.date, row.user, row.type, row.account, row.toAccount || '', row.category, 
-            row.assetName || '', row.assetQty || '', row.assetPrice || '', row.amount, `"${row.note || ''}"`
-          ].join(",");
-      }).join("\n");
-    
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `accounting_data_${new Date().toISOString().slice(0,10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  // --- 頁面渲染 ---
-
-  const renderDashboard = () => (
-    <div className="space-y-6 pb-20 animate-fade-in">
-      {/* 總結卡片 */}
-      <div className="grid grid-cols-2 gap-4">
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-          <p className="text-gray-500 text-sm">本月收入</p>
-          <p className="text-2xl font-bold text-green-600">{formatCurrency(stats.income)}</p>
-        </div>
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-          <p className="text-gray-500 text-sm">本月支出</p>
-          <p className="text-2xl font-bold text-red-500">{formatCurrency(stats.expense)}</p>
-        </div>
-      </div>
-
-      {/* 帳戶餘額 */}
-      <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-        <h3 className="text-lg font-bold mb-3 flex items-center text-gray-800"><Wallet className="mr-2" size={20}/> 帳戶餘額</h3>
-        <div className="space-y-2">
-          {Object.entries(stats.balances).map(([acc, bal]) => (
-            <div key={acc} className="flex justify-between items-center border-b border-gray-50 last:border-0 py-2">
-              <span className="text-gray-600">{acc}</span>
-              <span className={`font-semibold ${bal < 0 ? 'text-red-500' : 'text-gray-800'}`}>{formatCurrency(bal)}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* 圖表區 */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 h-80">
-          <h3 className="text-lg font-bold mb-2">本月支出類別</h3>
-          <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
-              <Pie data={stats.categoryData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label>
-                {stats.categoryData.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
-              </Pie>
-              <RechartsTooltip formatter={(value) => formatCurrency(value)} />
-              <Legend />
-            </PieChart>
-          </ResponsiveContainer>
-        </div>
-
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 h-80">
-          <h3 className="text-lg font-bold mb-2 flex items-center"><TrendingUp className="mr-2" size={20}/> 收支資產趨勢</h3>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={stats.trendData}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="name" />
-              <YAxis hide />
-              <RechartsTooltip formatter={(value) => formatCurrency(value)} />
-              <Legend />
-              <Bar dataKey="income" name="收入" fill="#00C49F" stackId="a" />
-              <Bar dataKey="expense" name="支出" fill="#FF8042" stackId="a" />
-              <Bar dataKey="assets" name="投資投入" fill="#8884d8" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderEntryForm = () => (
-    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 pb-24">
-      <h2 className="text-2xl font-bold mb-6 text-gray-800">新增交易</h2>
-      <form onSubmit={handleSubmit} className="space-y-4">
-        
-        {/* 使用者 & 交易方式 */}
-        <div className="grid grid-cols-2 gap-4">
-          <DynamicSelect 
-            label="使用者" 
-            value={formData.user} 
-            onChange={v => setFormData({...formData, user: v})} 
-            options={options.users}
-            onAddOption={v => handleAddOption('users', v)}
-            title="使用者"
-          />
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">交易方式</label>
-            <select 
-              value={formData.type} 
-              onChange={e => setFormData({...formData, type: e.target.value})}
-              className="w-full p-2 border border-gray-300 rounded-md bg-gray-50"
-            >
-              {['收入', '支出', '提款轉帳', '資產投資'].map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </div>
-        </div>
-
-        {/* 動態欄位邏輯 */}
-        {formData.type === '收入' && (
-          <>
-            <DynamicSelect label="存入帳戶" value={formData.account} onChange={v => setFormData({...formData, account: v})} options={options.accounts} onAddOption={v => handleAddOption('accounts', v)} title="帳戶"/>
-            <DynamicSelect label="收入類別" value={formData.category} onChange={v => setFormData({...formData, category: v})} options={options.incomeCategories} onAddOption={v => handleAddOption('incomeCategories', v)} title="收入類別"/>
-          </>
-        )}
-
-        {formData.type === '支出' && (
-          <>
-            <DynamicSelect label="支出帳戶" value={formData.account} onChange={v => setFormData({...formData, account: v})} options={options.accounts} onAddOption={v => handleAddOption('accounts', v)} title="帳戶"/>
-            <DynamicSelect label="支出類別" value={formData.category} onChange={v => setFormData({...formData, category: v})} options={options.expenseCategories} onAddOption={v => handleAddOption('expenseCategories', v)} title="支出類別"/>
-          </>
-        )}
-
-        {formData.type === '提款轉帳' && (
-          <>
-            <div className="flex items-center gap-2">
-              <div className="flex-1">
-                <DynamicSelect label="轉出帳戶" value={formData.account} onChange={v => setFormData({...formData, account: v})} options={options.accounts} onAddOption={v => handleAddOption('accounts', v)} title="帳戶"/>
-              </div>
-              <ArrowRightLeft className="mt-4 text-gray-400" />
-              <div className="flex-1">
-                <DynamicSelect label="轉入帳戶" value={formData.toAccount} onChange={v => setFormData({...formData, toAccount: v})} options={options.accounts} onAddOption={v => handleAddOption('accounts', v)} title="帳戶"/>
-              </div>
-            </div>
-            <DynamicSelect label="轉帳類別" value={formData.category} onChange={v => setFormData({...formData, category: v})} options={options.transferCategories} onAddOption={v => handleAddOption('transferCategories', v)} title="轉帳類別"/>
-          </>
-        )}
-
-        {formData.type === '資產投資' && (
-          <>
-             <DynamicSelect label="扣款帳戶" value={formData.account} onChange={v => setFormData({...formData, account: v})} options={options.accounts} onAddOption={v => handleAddOption('accounts', v)} title="帳戶"/>
-             <DynamicSelect label="資產代號/名稱" value={formData.assetName} onChange={v => setFormData({...formData, assetName: v})} options={options.assets} onAddOption={v => handleAddOption('assets', v)} title="資產"/>
-             <div className="grid grid-cols-2 gap-4">
-                <div>
-                   <label className="block text-sm font-medium text-gray-700 mb-1">數量</label>
-                   <input type="number" value={formData.assetQty} onChange={e => setFormData({...formData, assetQty: e.target.value})} className="w-full p-2 border rounded-md" placeholder="股數/單位"/>
-                </div>
-                <div>
-                   <label className="block text-sm font-medium text-gray-700 mb-1">單價</label>
-                   <input type="number" value={formData.assetPrice} onChange={e => setFormData({...formData, assetPrice: e.target.value})} className="w-full p-2 border rounded-md" placeholder="成交單價"/>
-                </div>
-             </div>
-          </>
-        )}
-
-        {/* 金額與備註 (通用) */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">金額</label>
-          <div className="relative">
-            <span className="absolute left-3 top-2 text-gray-500">$</span>
-            <input 
-              type="number" 
-              value={formData.amount} 
-              onChange={e => setFormData({...formData, amount: e.target.value})}
-              className="w-full p-2 pl-7 border border-gray-300 rounded-md text-lg font-semibold text-blue-900"
-              placeholder="0"
-              required
-            />
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">備註</label>
-          <textarea 
-            value={formData.note} 
-            onChange={e => setFormData({...formData, note: e.target.value})}
-            className="w-full p-2 border border-gray-300 rounded-md"
-            rows="2"
-            placeholder="說明..."
-          />
-        </div>
-
-        <button type="submit" className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold shadow-md hover:bg-blue-700 transition flex items-center justify-center gap-2" disabled={isSyncing}>
-          {isSyncing ? <Loader className="animate-spin" /> : <Save size={20} />} 
-          {isSyncing ? '同步中...' : '儲存交易'}
-        </button>
-      </form>
-    </div>
-  );
-
-  const renderAssets = () => (
-    <div className="pb-24">
-      <h2 className="text-2xl font-bold mb-4 px-4 pt-4">資產總覽</h2>
-      <div className="px-4 mb-4 text-sm text-gray-500">
-        * 現價模擬自系統預設，實際串接後將抓取 Google Sheet 價格
-      </div>
-      <div className="space-y-4 px-4">
-        {stats.assetReport.map(asset => (
-          <div key={asset.name} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-            <div className="flex justify-between items-start mb-2">
-              <h3 className="font-bold text-lg text-blue-900">{asset.name}</h3>
-              <span className={`px-2 py-1 rounded text-xs font-bold ${asset.profit >= 0 ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
-                {asset.profitRate.toFixed(2)}%
-              </span>
-            </div>
-            <div className="grid grid-cols-2 gap-y-2 text-sm">
-              <div className="text-gray-500">持有數量</div>
-              <div className="text-right font-medium">{asset.qty.toLocaleString()}</div>
-              
-              <div className="text-gray-500">總成本</div>
-              <div className="text-right font-medium">{formatCurrency(asset.cost)}</div>
-              
-              <div className="text-gray-500">目前市值</div>
-              <div className="text-right font-bold text-blue-600">{formatCurrency(asset.value)}</div>
-              
-              <div className="text-gray-500">未實現損益</div>
-              <div className={`text-right font-bold ${asset.profit >= 0 ? 'text-red-500' : 'text-green-500'}`}>
-                {formatCurrency(asset.profit)}
-              </div>
-            </div>
-          </div>
-        ))}
-        {stats.assetReport.length === 0 && (
-          <div className="text-center text-gray-400 py-10">尚無資產資料</div>
-        )}
-      </div>
-    </div>
-  );
-
-  const renderSettings = () => (
-    <div className="p-4 pb-24 space-y-6">
-      <h2 className="text-2xl font-bold mb-4">設定與資料</h2>
-      
-      {/* Google Sheet 連結設定 */}
-      <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-        <h3 className="font-bold mb-2">Google Apps Script URL</h3>
-        <p className="text-xs text-gray-500 mb-2">部署 Web App 後取得的 URL，用於同步資料。</p>
-        <input 
-          type="text" 
-          value={apiUrl}
-          onChange={(e) => setApiUrl(e.target.value)}
-          placeholder="https://script.google.com/macros/s/..."
-          className="w-full p-2 border rounded mb-2 text-sm"
-        />
-        <div className="flex gap-2">
-          <button className="bg-green-600 text-white px-3 py-1 rounded text-sm flex items-center gap-1" onClick={() => { alert('設定已儲存'); fetchFromGoogleSheet(apiUrl); }}>
-             <Check size={14}/> 儲存並同步
-          </button>
-        </div>
-      </div>
-
-      {/* 資料操作 */}
-      <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-        <h3 className="font-bold mb-4">資料管理</h3>
-        <div className="flex flex-col gap-3">
-          <button onClick={() => fetchFromGoogleSheet(apiUrl)} disabled={!apiUrl || isSyncing} className="flex items-center gap-2 p-3 bg-blue-50 rounded hover:bg-blue-100 text-blue-700 disabled:opacity-50">
-            <RefreshCw size={18} className={isSyncing ? 'animate-spin' : ''} /> 
-            {isSyncing ? '同步中...' : '手動同步 Google Sheet'}
-          </button>
-
-          <button onClick={downloadCSV} className="flex items-center gap-2 p-3 bg-gray-50 rounded hover:bg-gray-100 text-gray-700">
-            <Download size={18} /> 匯出 CSV (Excel)
-          </button>
-          
-          <button onClick={() => { if(window.confirm('確定清除所有本機資料？無法復原')) { setTransactions([]); localStorage.clear(); window.location.reload(); } }} className="flex items-center gap-2 p-3 bg-red-50 rounded hover:bg-red-100 text-red-600">
-            <Trash2 size={18} /> 清除所有資料
-          </button>
-        </div>
-      </div>
-
-      {/* 近期交易列表 */}
-      <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-         <h3 className="font-bold mb-2">近期 10 筆交易</h3>
-         <div className="overflow-x-auto">
-           <table className="w-full text-sm text-left">
-             <thead className="bg-gray-50 text-gray-500">
-               <tr>
-                 <th className="p-2">日期</th>
-                 <th className="p-2">類型</th>
-                 <th className="p-2">金額</th>
-                 <th className="p-2">備註</th>
-               </tr>
-             </thead>
-             <tbody>
-               {transactions.slice(0, 10).map(tx => (
-                 <tr key={tx.id} className="border-t">
-                   <td className="p-2">{tx.date}</td>
-                   <td className="p-2">{tx.type}-{tx.category}</td>
-                   <td className="p-2">{tx.amount}</td>
-                   <td className="p-2 text-gray-400">{tx.note}</td>
-                 </tr>
-               ))}
-             </tbody>
-           </table>
-         </div>
-      </div>
-    </div>
-  );
-
-  return (
-    <div className="min-h-screen bg-gray-50 font-sans text-gray-900">
-      {/* 頂部導航 */}
-      <div className="bg-white shadow-sm sticky top-0 z-10 px-4 py-3 flex justify-between items-center">
-        <h1 className="text-xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-          SmartLedger
-        </h1>
-        <div className="flex items-center gap-2">
-           {isSyncing && <Loader size={16} className="text-gray-400 animate-spin" />}
-           <div className="text-xs text-gray-400">PWA v1.1</div>
-        </div>
-      </div>
-
-      {/* 主要內容區域 */}
-      <main className="max-w-md mx-auto pt-4">
-        {activeTab === 'dashboard' && renderDashboard()}
-        {activeTab === 'add' && renderEntryForm()}
-        {activeTab === 'assets' && renderAssets()}
-        {activeTab === 'settings' && renderSettings()}
-      </main>
-
-      {/* 底部 Tab Bar */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex justify-around py-3 pb-safe z-20 max-w-md mx-auto">
-        <button 
-          onClick={() => setActiveTab('dashboard')} 
-          className={`flex flex-col items-center text-xs ${activeTab === 'dashboard' ? 'text-blue-600' : 'text-gray-400'}`}
-        >
-          <TrendingUp size={24} className="mb-1" />
-          總覽
-        </button>
-        <button 
-          onClick={() => setActiveTab('add')} 
-          className={`flex flex-col items-center text-xs ${activeTab === 'add' ? 'text-blue-600' : 'text-gray-400'}`}
-        >
-          <PlusCircle size={24} className="mb-1" />
-          記帳
-        </button>
-        <button 
-          onClick={() => setActiveTab('assets')} 
-          className={`flex flex-col items-center text-xs ${activeTab === 'assets' ? 'text-blue-600' : 'text-gray-400'}`}
-        >
-          <Wallet size={24} className="mb-1" />
-          資產
-        </button>
-        <button 
-          onClick={() => setActiveTab('settings')} 
-          className={`flex flex-col items-center text-xs ${activeTab === 'settings' ? 'text-blue-600' : 'text-gray-400'}`}
-        >
-          <Settings size={24} className="mb-1" />
-          設定
-        </button>
-      </nav>
-
-      <style>{`
+    <style>
         .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
-        @keyframes fade-in {
-          from { opacity: 0; transform: translateY(10px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
+        @keyframes fade-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         .animate-fade-in { animation: fade-in 0.3s ease-out; }
-      `}</style>
-    </div>
-  );
-}
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        body { background-color: #f9fafb; -webkit-tap-highlight-color: transparent; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+
+        // --- Recharts 安全載入機制 (避免當機) ---
+        const RechartsLib = window.Recharts || {};
+        const SafeFallback = () => null;
+        const SafeContainer = ({children}) => <div className="h-full w-full flex items-center justify-center bg-gray-50 rounded text-gray-400 text-sm">圖表模組載入中...</div>;
+        const {
+            PieChart = SafeFallback, Pie = SafeFallback, Cell = SafeFallback,
+            BarChart = SafeFallback, Bar = SafeFallback,
+            XAxis = SafeFallback, YAxis = SafeFallback,
+            CartesianGrid = SafeFallback, Tooltip: RechartsTooltip = SafeFallback,
+            Legend = SafeFallback, ResponsiveContainer = SafeContainer
+        } = RechartsLib;
+        const isChartLibReady = !!window.Recharts;
+
+        // --- 內建 SVG 圖示 ---
+        const Icon = ({ path, className, size = 20 }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>{path}</svg>
+        );
+        const Icons = {
+            Plus: (props) => <Icon {...props} path={<><path d="M5 12h14"/><path d="M12 5v14"/></>} />,
+            ArrowRightLeft: (props) => <Icon {...props} path={<><path d="m16 3 4 4-4 4"/><path d="M20 7H4"/><path d="m8 21-4-4 4-4"/><path d="M4 17h16"/></>} />,
+            TrendingUp: (props) => <Icon {...props} path={<><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></>} />,
+            Wallet: (props) => <Icon {...props} path={<><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></>} />,
+            Settings: (props) => <Icon {...props} path={<><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.47a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></>} />,
+            Save: (props) => <Icon {...props} path={<><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></>} />,
+            Download: (props) => <Icon {...props} path={<><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></>} />,
+            RefreshCw: (props) => <Icon {...props} path={<><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></>} />,
+            Trash2: (props) => <Icon {...props} path={<><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></>} />,
+            PlusCircle: (props) => <Icon {...props} path={<><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/><path d="M12 8v8"/></>} />,
+            Check: (props) => <Icon {...props} path={<><polyline points="20 6 9 17 4 12"/></>} />,
+            Loader: (props) => <Icon {...props} className={`${props.className} animate-spin`} path={<><path d="M21 12a9 9 0 1 1-6.219-8.56"/></>} />,
+            Filter: (props) => <Icon {...props} path={<><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></>} />,
+            CloudLightning: (props) => <Icon {...props} path={<><path d="M19 16.9A5 5 0 0 0 18 7h-1.26a8 8 0 1 0-11.62 9"/><polyline points="13 11 9 17 15 17 11 23"/></>} />
+        };
+
+        const DEFAULT_OPTIONS = {
+            users: ['Wisdom', 'Lowson'],
+            types: ['收入', '支出', '提款轉帳', '資產投資'],
+            accounts: ['現金', '中信薪轉帳戶', '彰銀房貸帳戶', '永豐股票帳戶', '凱基債劵帳戶', '永豐債劵帳戶'],
+            incomeCategories: ['薪資獎金', '股票股利', '債卷配息', '其他收入'],
+            expenseCategories: ['餐飲支出', '水電瓦斯', '生活用品', '休閒旅遊', '醫療保險', '交通通勤'],
+            transferCategories: ['提款', '轉帳', '繳卡費', '繳貸款'],
+            assets: ['00937B', '00945B', '00953B', '00981B', '0050'],
+        };
+        const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d', '#ffc658'];
+        const formatCurrency = (val) => new Intl.NumberFormat('zh-TW', { style: 'currency', currency: 'TWD', minimumFractionDigits: 0 }).format(val);
+
+        const AddOptionModal = ({ isOpen, onClose, title, onAdd }) => {
+            const [newValue, setNewValue] = useState('');
+            if (!isOpen) return null;
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div className="bg-white p-6 rounded-lg shadow-xl w-80 m-4">
+                        <h3 className="text-lg font-bold mb-4">新增{title}</h3>
+                        <input type="text" value={newValue} onChange={(e) => setNewValue(e.target.value)} className="w-full border p-2 rounded mb-4" placeholder={`輸入新${title}`} autoFocus />
+                        <div className="flex justify-end gap-2">
+                            <button onClick={onClose} className="px-4 py-2 text-gray-600">取消</button>
+                            <button onClick={() => { if(newValue) { onAdd(newValue); setNewValue(''); onClose(); }}} className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">新增</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const DynamicSelect = ({ label, value, onChange, options, onAddOption, title }) => {
+            const [isModalOpen, setIsModalOpen] = useState(false);
+            return (
+                <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+                    <div className="flex gap-2">
+                        <select value={value} onChange={(e) => onChange(e.target.value)} className="flex-1 p-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 bg-white">
+                            {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                        </select>
+                        <button type="button" onClick={() => setIsModalOpen(true)} className="p-2 bg-gray-100 text-gray-600 rounded-md hover:bg-gray-200" title="新增選項">
+                            <Icons.PlusCircle size={20} />
+                        </button>
+                    </div>
+                    <AddOptionModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={title} onAdd={onAddOption} />
+                </div>
+            );
+        };
+
+        function App() {
+            const [activeTab, setActiveTab] = useState('dashboard');
+            const [transactions, setTransactions] = useState([]);
+            // 資產價格狀態
+            const [assetPrices, setAssetPrices] = useState({});
+            const [options, setOptions] = useState(DEFAULT_OPTIONS);
+            const [apiUrl, setApiUrl] = useState('');
+            const [isSyncing, setIsSyncing] = useState(false);
+            const [dashboardUser, setDashboardUser] = useState('所有使用者');
+
+            const [formData, setFormData] = useState({
+                user: 'Wisdom', type: '支出', account: '', toAccount: '', category: '', 
+                assetName: '', assetQty: '', assetPrice: '', amount: '', note: ''
+            });
+
+            // 確保圖表庫載入
+            const [libReady, setLibReady] = useState(isChartLibReady);
+            useEffect(() => {
+                if(!libReady && window.Recharts) setLibReady(true);
+            }, []);
+
+            // 初始化
+            useEffect(() => {
+                const savedTx = localStorage.getItem('pwa_transactions');
+                if (savedTx) setTransactions(JSON.parse(savedTx));
+                
+                const savedOptions = localStorage.getItem('pwa_options');
+                if (savedOptions) {
+                    const parsed = JSON.parse(savedOptions);
+                    setOptions(prev => ({ ...prev, ...parsed, types: parsed.types || DEFAULT_OPTIONS.types }));
+                }
+
+                // 讀取本地儲存的資產價格
+                const savedPrices = localStorage.getItem('pwa_asset_prices');
+                if (savedPrices) setAssetPrices(JSON.parse(savedPrices));
+                
+                const savedUrl = localStorage.getItem('pwa_api_url');
+                if (savedUrl) {
+                    setApiUrl(savedUrl);
+                    setTimeout(() => fetchFromGoogleSheet(savedUrl), 1000);
+                }
+            }, []);
+
+            // 狀態變更時儲存
+            useEffect(() => {
+                localStorage.setItem('pwa_transactions', JSON.stringify(transactions));
+                localStorage.setItem('pwa_options', JSON.stringify(options));
+                localStorage.setItem('pwa_asset_prices', JSON.stringify(assetPrices));
+                localStorage.setItem('pwa_api_url', apiUrl);
+            }, [transactions, options, assetPrices, apiUrl]);
+
+            useEffect(() => {
+                const newForm = { ...formData };
+                if (formData.type === '收入') { newForm.category = options.incomeCategories[0]; newForm.account = options.accounts[0]; }
+                else if (formData.type === '支出') { newForm.category = options.expenseCategories[0]; newForm.account = options.accounts[0]; }
+                else if (formData.type === '提款轉帳') { newForm.account = options.accounts[1]; newForm.toAccount = options.accounts[0]; newForm.category = options.transferCategories[0]; }
+                else if (formData.type === '資產投資') { newForm.account = '凱基債劵帳戶'; newForm.assetName = '00981B'; newForm.category = '投資買入'; }
+                else { newForm.category = options.expenseCategories[0]; newForm.account = options.accounts[0]; }
+                setFormData(newForm);
+            }, [formData.type]);
+
+            useEffect(() => {
+                if (formData.type === '資產投資' && formData.assetQty && formData.assetPrice) {
+                    setFormData(prev => ({ ...prev, amount: Math.floor(prev.assetQty * prev.assetPrice) }));
+                }
+            }, [formData.assetQty, formData.assetPrice]);
+
+            // 同步功能
+            const fetchFromGoogleSheet = async (url) => {
+                const targetUrl = url || apiUrl;
+                if (!targetUrl) return;
+                setIsSyncing(true);
+                try {
+                    const response = await fetch(targetUrl);
+                    const data = await response.json();
+                    
+                    if (Array.isArray(data)) {
+                        if (data.length > 0) setTransactions(data);
+                    } else if (data.transactions) {
+                        if (data.transactions.length > 0) setTransactions(data.transactions);
+                        if (data.prices && Object.keys(data.prices).length > 0) {
+                            setAssetPrices(data.prices);
+                            console.log("已更新資產價格:", data.prices);
+                        }
+                    }
+                } catch (error) { console.error("同步失敗", error); } 
+                finally { setIsSyncing(false); }
+            };
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                const newTx = {
+                    id: Date.now(), date: new Date().toISOString().split('T')[0], timestamp: new Date().toISOString(),
+                    ...formData, amount: Number(formData.amount),
+                    assetQty: formData.assetQty ? Number(formData.assetQty) : '',
+                    assetPrice: formData.assetPrice ? Number(formData.assetPrice) : '',
+                };
+                const updatedTransactions = [newTx, ...transactions];
+                setTransactions(updatedTransactions);
+                setFormData(prev => ({ ...prev, amount: '', note: '', assetQty: '', assetPrice: '' }));
+
+                if (apiUrl) {
+                    setIsSyncing(true);
+                    try {
+                        await fetch(apiUrl, {
+                            method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(newTx)
+                        });
+                        setTimeout(() => fetchFromGoogleSheet(apiUrl), 1500);
+                    } catch (error) { alert("同步失敗，僅儲存於本機"); setIsSyncing(false); }
+                } else { alert('已儲存 (本機模式)'); }
+            };
+
+            const handleAddOption = (key, value) => setOptions(prev => ({ ...prev, [key]: [...prev[key], value] }));
+
+            const downloadExcel = () => {
+                const data = transactions.map(row => ({
+                    "日期": row.date, "使用者": row.user, "交易方式": row.type, "轉出/支出帳戶": row.account,
+                    "轉入帳戶": row.toAccount || '', "交易類別": row.category, "資產名稱": row.assetName || '',
+                    "數量": row.assetQty || '', "單價": row.assetPrice || '', "金額": row.amount, "備註": row.note || ''
+                }));
+                const worksheet = XLSX.utils.json_to_sheet(data);
+                const workbook = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(workbook, worksheet, "交易紀錄");
+                XLSX.writeFile(workbook, `SmartLedger_Data_${new Date().toISOString().slice(0,10)}.xlsx`);
+            };
+
+            const stats = useMemo(() => {
+                const currentMonth = new Date().toISOString().slice(0, 7);
+                let income = 0, expense = 0, balances = {}, assets = {}, categoryStats = {}, monthlyTrend = {};
+                
+                options.accounts.forEach(acc => balances[acc] = 0);
+                options.assets.forEach(ast => assets[ast] = { qty: 0, cost: 0 });
+
+                const filteredTransactions = dashboardUser === '所有使用者' ? transactions : transactions.filter(t => t.user === dashboardUser);
+
+                [...filteredTransactions].reverse().forEach(tx => {
+                    const month = tx.date.slice(0, 7);
+                    if (tx.type === '收入') {
+                        balances[tx.account] = (balances[tx.account] || 0) + tx.amount;
+                        if(month === currentMonth) income += tx.amount;
+                    } else if (tx.type === '支出') {
+                        balances[tx.account] = (balances[tx.account] || 0) - tx.amount;
+                        if(month === currentMonth) { expense += tx.amount; categoryStats[tx.category] = (categoryStats[tx.category] || 0) + tx.amount; }
+                    } else if (tx.type === '提款轉帳') {
+                        balances[tx.account] = (balances[tx.account] || 0) - tx.amount;
+                        balances[tx.toAccount] = (balances[tx.toAccount] || 0) + tx.amount;
+                    } else if (tx.type === '資產投資') {
+                        balances[tx.account] = (balances[tx.account] || 0) - tx.amount;
+                        if(!assets[tx.assetName]) assets[tx.assetName] = { qty: 0, cost: 0 };
+                        assets[tx.assetName].qty += tx.assetQty;
+                        assets[tx.assetName].cost += tx.amount;
+                    } else {
+                        balances[tx.account] = (balances[tx.account] || 0) - tx.amount;
+                        if(month === currentMonth) { expense += tx.amount; categoryStats[tx.category] = (categoryStats[tx.category] || 0) + tx.amount; }
+                    }
+
+                    if (!monthlyTrend[month]) monthlyTrend[month] = { name: month, income: 0, expense: 0, assets: 0 };
+                    if (tx.type === '收入') monthlyTrend[month].income += tx.amount;
+                    if (tx.type === '支出' || (!['收入','提款轉帳','資產投資'].includes(tx.type))) monthlyTrend[month].expense += tx.amount;
+                    if (tx.type === '資產投資') monthlyTrend[month].assets += tx.amount;
+                });
+
+                const assetReport = Object.keys(assets).map(name => {
+                    const { qty, cost } = assets[name];
+                    const currentPrice = assetPrices[name] !== undefined ? assetPrices[name] : 10;
+                    const value = qty * currentPrice;
+                    const profit = value - cost;
+                    const profitRate = cost > 0 ? (profit / cost) * 100 : 0;
+                    const isRealTime = assetPrices[name] !== undefined;
+                    return { name, qty, cost, value, profit, profitRate, isRealTime, currentPrice };
+                }).filter(a => a.qty > 0);
+
+                const categoryData = Object.keys(categoryStats).map(key => ({ name: key, value: categoryStats[key] }));
+                const trendData = Object.values(monthlyTrend).sort((a,b) => a.name.localeCompare(b.name));
+                return { income, expense, balances, assetReport, categoryData, trendData };
+            }, [transactions, options, dashboardUser, assetPrices]);
+
+            const renderDashboard = () => (
+                <div className="space-y-6 pb-20 animate-fade-in px-4">
+                    <div className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 flex items-center gap-2">
+                        <Icons.Filter className="text-gray-500" size={18} />
+                        <select value={dashboardUser} onChange={(e) => setDashboardUser(e.target.value)} className="w-full bg-transparent font-bold text-gray-700 outline-none">
+                            <option value="所有使用者">所有使用者</option>
+                            {options.users.map(u => <option key={u} value={u}>{u}</option>)}
+                        </select>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100"><p className="text-gray-500 text-sm">本月收入</p><p className="text-2xl font-bold text-green-600">{formatCurrency(stats.income)}</p></div>
+                        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100"><p className="text-gray-500 text-sm">本月支出</p><p className="text-2xl font-bold text-red-500">{formatCurrency(stats.expense)}</p></div>
+                    </div>
+                    <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+                        <h3 className="text-lg font-bold mb-3 flex items-center text-gray-800"><Icons.Wallet className="mr-2" /> 帳戶餘額 ({dashboardUser})</h3>
+                        <div className="space-y-2">
+                            {Object.entries(stats.balances).map(([acc, bal]) => (
+                                <div key={acc} className="flex justify-between items-center border-b border-gray-50 last:border-0 py-2">
+                                    <span className="text-gray-600">{acc}</span><span className={`font-semibold ${bal < 0 ? 'text-red-500' : 'text-gray-800'}`}>{formatCurrency(bal)}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 h-80">
+                            <h3 className="text-lg font-bold mb-2">本月支出類別</h3>
+                            <ResponsiveContainer width="100%" height="100%">
+                                {stats.categoryData.length > 0 ? (
+                                    <PieChart><Pie data={stats.categoryData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label>{stats.categoryData.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}</Pie><RechartsTooltip formatter={(value) => formatCurrency(value)} /><Legend /></PieChart>
+                                ) : <div className="flex items-center justify-center h-full text-gray-400">尚無資料</div>}
+                            </ResponsiveContainer>
+                        </div>
+                        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 h-80">
+                            <h3 className="text-lg font-bold mb-2 flex items-center"><Icons.TrendingUp className="mr-2" /> 收支資產趨勢</h3>
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={stats.trendData}>
+                                    <CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" /><YAxis hide /><RechartsTooltip formatter={(value) => formatCurrency(value)} /><Legend />
+                                    <Bar dataKey="income" name="收入" fill="#00C49F" stackId="a" /><Bar dataKey="expense" name="支出" fill="#FF8042" stackId="a" /><Bar dataKey="assets" name="投資投入" fill="#8884d8" />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const renderEntryForm = () => (
+                <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 pb-24 mx-4">
+                    <h2 className="text-2xl font-bold mb-6 text-gray-800">新增交易</h2>
+                    <form onSubmit={handleSubmit} className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                            <DynamicSelect label="使用者" value={formData.user} onChange={v => setFormData({...formData, user: v})} options={options.users} onAddOption={v => handleAddOption('users', v)} title="使用者" />
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">交易方式</label>
+                                <div className="flex gap-2">
+                                    <select value={formData.type} onChange={e => setFormData({...formData, type: e.target.value})} className="flex-1 p-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 bg-white">
+                                        {options.types.map(t => <option key={t} value={t}>{t}</option>)}
+                                    </select>
+                                </div>
+                                <DynamicSelect label="" value={formData.type} onChange={v => setFormData({...formData, type: v})} options={options.types} onAddOption={v => handleAddOption('types', v)} title="交易方式" />
+                                <style>{`div:has(> label:empty) { margin-top: -1.5rem; }`}</style>
+                            </div>
+                        </div>
+
+                        {formData.type === '收入' && (<><DynamicSelect label="存入帳戶" value={formData.account} onChange={v => setFormData({...formData, account: v})} options={options.accounts} onAddOption={v => handleAddOption('accounts', v)} title="帳戶"/><DynamicSelect label="收入類別" value={formData.category} onChange={v => setFormData({...formData, category: v})} options={options.incomeCategories} onAddOption={v => handleAddOption('incomeCategories', v)} title="收入類別"/></>)}
+                        {(formData.type === '支出' || (!['收入','提款轉帳','資產投資'].includes(formData.type))) && (<><DynamicSelect label="支出帳戶" value={formData.account} onChange={v => setFormData({...formData, account: v})} options={options.accounts} onAddOption={v => handleAddOption('accounts', v)} title="帳戶"/><DynamicSelect label="支出類別" value={formData.category} onChange={v => setFormData({...formData, category: v})} options={options.expenseCategories} onAddOption={v => handleAddOption('expenseCategories', v)} title="支出類別"/></>)}
+                        {formData.type === '提款轉帳' && (<><div className="flex items-center gap-2"><div className="flex-1"><DynamicSelect label="轉出帳戶" value={formData.account} onChange={v => setFormData({...formData, account: v})} options={options.accounts} onAddOption={v => handleAddOption('accounts', v)} title="帳戶"/></div><Icons.ArrowRightLeft className="mt-4 text-gray-400" /><div className="flex-1"><DynamicSelect label="轉入帳戶" value={formData.toAccount} onChange={v => setFormData({...formData, toAccount: v})} options={options.accounts} onAddOption={v => handleAddOption('accounts', v)} title="帳戶"/></div></div><DynamicSelect label="轉帳類別" value={formData.category} onChange={v => setFormData({...formData, category: v})} options={options.transferCategories} onAddOption={v => handleAddOption('transferCategories', v)} title="轉帳類別"/></>)}
+                        {formData.type === '資產投資' && (<><DynamicSelect label="扣款帳戶" value={formData.account} onChange={v => setFormData({...formData, account: v})} options={options.accounts} onAddOption={v => handleAddOption('accounts', v)} title="帳戶"/><DynamicSelect label="資產代號/名稱" value={formData.assetName} onChange={v => setFormData({...formData, assetName: v})} options={options.assets} onAddOption={v => handleAddOption('assets', v)} title="資產"/><div className="grid grid-cols-2 gap-4"><div><label className="block text-sm font-medium text-gray-700 mb-1">數量</label><input type="number" value={formData.assetQty} onChange={e => setFormData({...formData, assetQty: e.target.value})} className="w-full p-2 border rounded-md" placeholder="股數"/></div><div><label className="block text-sm font-medium text-gray-700 mb-1">單價</label><input type="number" value={formData.assetPrice} onChange={e => setFormData({...formData, assetPrice: e.target.value})} className="w-full p-2 border rounded-md" placeholder="價格"/></div></div></>)}
+
+                        <div><label className="block text-sm font-medium text-gray-700 mb-1">金額</label><div className="relative"><span className="absolute left-3 top-2 text-gray-500">$</span><input type="number" value={formData.amount} onChange={e => setFormData({...formData, amount: e.target.value})} className="w-full p-2 pl-7 border border-gray-300 rounded-md text-lg font-semibold text-blue-900" placeholder="0" required /></div></div>
+                        <div><label className="block text-sm font-medium text-gray-700 mb-1">備註</label><textarea value={formData.note} onChange={e => setFormData({...formData, note: e.target.value})} className="w-full p-2 border border-gray-300 rounded-md" rows="2" placeholder="說明..." /></div>
+                        <button type="submit" className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold shadow-md hover:bg-blue-700 transition flex items-center justify-center gap-2" disabled={isSyncing}>{isSyncing ? <Icons.Loader /> : <Icons.Save size={20} />} {isSyncing ? '同步中...' : '儲存交易'}</button>
+                    </form>
+                </div>
+            );
+
+            const renderAssets = () => (
+                <div className="pb-24">
+                    <h2 className="text-2xl font-bold mb-4 px-4 pt-4">資產總覽</h2>
+                    <div className="px-4 mb-4 text-sm text-gray-500 flex items-center gap-1">
+                        <Icons.CloudLightning size={14} className="text-blue-500" />
+                        資產價格來自 Google 試算表同步 (若有雷電圖示)
+                    </div>
+                    <div className="space-y-4 px-4">
+                        {stats.assetReport.map(asset => (
+                            <div key={asset.name} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+                                <div className="flex justify-between items-start mb-2">
+                                    <h3 className="font-bold text-lg text-blue-900 flex items-center gap-2">
+                                        {asset.name}
+                                        {asset.isRealTime && <Icons.CloudLightning size={16} className="text-blue-500" title="即時價格" />}
+                                    </h3>
+                                    <span className={`px-2 py-1 rounded text-xs font-bold ${asset.profit >= 0 ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>{asset.profitRate.toFixed(2)}%</span>
+                                </div>
+                                <div className="grid grid-cols-2 gap-y-2 text-sm">
+                                    <div className="text-gray-500">持有數量</div><div className="text-right font-medium">{asset.qty.toLocaleString()}</div>
+                                    <div className="text-gray-500">總成本</div><div className="text-right font-medium">{formatCurrency(asset.cost)}</div>
+                                    <div className="text-gray-500">市價 ({asset.currentPrice})</div><div className="text-right font-bold text-blue-600">{formatCurrency(asset.value)}</div>
+                                    <div className="text-gray-500">未實現損益</div><div className={`text-right font-bold ${asset.profit >= 0 ? 'text-red-500' : 'text-green-500'}`}>{formatCurrency(asset.profit)}</div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+
+            const renderSettings = () => (
+                <div className="p-4 pb-24 space-y-6">
+                    <h2 className="text-2xl font-bold mb-4">設定與資料</h2>
+                    <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+                        <h3 className="font-bold mb-2">Google Apps Script URL</h3>
+                        <input type="text" value={apiUrl} onChange={(e) => setApiUrl(e.target.value)} placeholder="https://script.google.com/..." className="w-full p-2 border rounded mb-2 text-sm" />
+                        <button className="bg-green-600 text-white px-3 py-1 rounded text-sm flex items-center gap-1" onClick={() => { alert('設定已儲存'); fetchFromGoogleSheet(apiUrl); }}><Icons.Check size={14}/> 儲存並同步</button>
+                    </div>
+                    <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+                        <h3 className="font-bold mb-4">資料管理</h3>
+                        <div className="flex flex-col gap-3">
+                            <button onClick={() => fetchFromGoogleSheet(apiUrl)} disabled={!apiUrl || isSyncing} className="flex items-center gap-2 p-3 bg-blue-50 rounded hover:bg-blue-100 text-blue-700 disabled:opacity-50"><Icons.RefreshCw size={18} className={isSyncing ? 'animate-spin' : ''} /> {isSyncing ? '同步中...' : '手動同步 Google Sheet'}</button>
+                            <button onClick={downloadExcel} className="flex items-center gap-2 p-3 bg-gray-50 rounded hover:bg-gray-100 text-gray-700"><Icons.Download size={18} /> 匯出 Excel (.xlsx)</button>
+                            <button onClick={() => { if(window.confirm('確定清除所有本機資料？')) { setTransactions([]); localStorage.clear(); window.location.reload(); } }} className="flex items-center gap-2 p-3 bg-red-50 rounded hover:bg-red-100 text-red-600"><Icons.Trash2 size={18} /> 清除資料</button>
+                        </div>
+                    </div>
+                    <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                        <h3 className="font-bold mb-2">近期 10 筆交易</h3>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm text-left">
+                                <thead className="bg-gray-50 text-gray-500"><tr><th className="p-2">日期</th><th className="p-2">類型</th><th className="p-2">金額</th><th className="p-2">備註</th></tr></thead>
+                                <tbody>{transactions.slice(0, 10).map(tx => (<tr key={tx.id} className="border-t"><td className="p-2">{tx.date}</td><td className="p-2">{tx.type}-{tx.category}</td><td className="p-2">{tx.amount}</td><td className="p-2 text-gray-400">{tx.note}</td></tr>))}</tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            return (
+                <div className="min-h-screen bg-gray-50 font-sans text-gray-900 max-w-md mx-auto relative shadow-2xl">
+                    <div className="bg-white shadow-sm sticky top-0 z-10 px-4 py-3 flex justify-between items-center">
+                        <h1 className="text-xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">SmartLedger</h1>
+                        <div className="flex items-center gap-2">{isSyncing && <Icons.Loader size={16} className="text-gray-400" />}<div className="text-xs text-gray-400">PWA v2.0</div></div>
+                    </div>
+                    <main className="pt-4">{activeTab === 'dashboard' && renderDashboard()}{activeTab === 'add' && renderEntryForm()}{activeTab === 'assets' && renderAssets()}{activeTab === 'settings' && renderSettings()}</main>
+                    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex justify-around py-3 pb-safe z-20 max-w-md mx-auto">
+                        <button onClick={() => setActiveTab('dashboard')} className={`flex flex-col items-center text-xs ${activeTab === 'dashboard' ? 'text-blue-600' : 'text-gray-400'}`}><Icons.TrendingUp size={24} className="mb-1" />總覽</button>
+                        <button onClick={() => setActiveTab('add')} className={`flex flex-col items-center text-xs ${activeTab === 'add' ? 'text-blue-600' : 'text-gray-400'}`}><Icons.PlusCircle size={24} className="mb-1" />記帳</button>
+                        <button onClick={() => setActiveTab('assets')} className={`flex flex-col items-center text-xs ${activeTab === 'assets' ? 'text-blue-600' : 'text-gray-400'}`}><Icons.Wallet size={24} className="mb-1" />資產</button>
+                        <button onClick={() => setActiveTab('settings')} className={`flex flex-col items-center text-xs ${activeTab === 'settings' ? 'text-blue-600' : 'text-gray-400'}`}><Icons.Settings size={24} className="mb-1" />設定</button>
+                    </nav>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
