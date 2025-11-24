@@ -15,7 +15,7 @@
     <script src="https://unpkg.com/react@18.2.0/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js" crossorigin></script>
     
-    <!-- Chart.js (更穩定強大的圖表庫) -->
+    <!-- Chart.js (解決圖表不顯示問題) -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     
     <!-- 其他工具 -->
@@ -38,7 +38,7 @@
     <script type="text/babel">
         const { useState, useEffect, useMemo, useRef } = React;
 
-        // --- Chart.js 封裝元件 ---
+        // --- Chart.js 封裝元件 (保證顯示) ---
         const ChartComponent = ({ type, data, options }) => {
             const canvasRef = useRef(null);
             const chartRef = useRef(null);
@@ -68,7 +68,7 @@
                         chartRef.current.destroy();
                     }
                 };
-            }, [type, data, options]);
+            }, [type, data, options]); // 當數據改變時重繪
 
             return <div style={{ position: 'relative', height: '100%', width: '100%' }}><canvas ref={canvasRef} /></div>;
         };
@@ -312,7 +312,6 @@
             }, [transactions, options, dashboardUser, assetPrices]);
 
             const renderCharts = () => {
-                // Prepare Data for Chart.js
                 const pieData = {
                     labels: stats.categoryData.map(d => d.name),
                     datasets: [{
