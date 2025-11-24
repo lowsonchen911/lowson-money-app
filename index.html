@@ -3,15 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>家庭記帳 PWA (自定義版)</title>
+    <title>家庭記帳 (雲端共用版)</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     <style>
         body { -webkit-tap-highlight-color: transparent; background-color: #f3f4f6; }
-        .app-container { max-width: 600px; margin: 0 auto; background: white; min-height: 100vh; box-shadow: 0 0 15px rgba(0,0,0,0.1); }
-        /* 隱藏捲軸但保留功能 */
+        .app-container { max-width: 600px; margin: 0 auto; background: white; min-height: 100vh; position: relative; }
+        /* Loading 遮罩 */
+        .loading-overlay { position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(255,255,255,0.8); z-index: 50; display: flex; justify-content: center; align-items: center; flex-direction: column; }
+        .spinner { border: 4px solid #f3f3f3; border-top: 4px solid #3b82f6; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
@@ -20,13 +23,23 @@
 
 <div id="app" class="app-container flex flex-col">
     
+    <div v-if="isLoading" class="loading-overlay">
+        <div class="spinner mb-2"></div>
+        <div class="text-slate-600 font-bold">資料同步中...</div>
+    </div>
+
     <header class="bg-slate-800 text-white p-4 sticky top-0 z-10 shadow-md flex justify-between items-center">
-        <h1 class="text-lg font-bold">家庭記帳 PWA</h1>
-        <button @click="exportCSV" class="text-xs bg-green-600 px-2 py-1 rounded hover:bg-green-500">匯出 CSV</button>
+        <div class="flex items-center gap-2">
+            <h1 class="text-lg font-bold">家庭記帳</h1>
+            <span class="text-xs bg-blue-600 px-2 py-0.5 rounded-full">雲端版</span>
+        </div>
+        <button @click="fetchData" class="text-xs border border-white px-2 py-1 rounded hover:bg-slate-700">
+            ↻ 重新整理
+        </button>
     </header>
 
-    <div v-if="currentTab !== 'settings'" class="p-4 bg-slate-800 text-white rounded-b-3xl shadow-lg mb-4 transition-all">
-        <div class="text-slate-400 text-sm">目前總資產</div>
+    <div v-if="currentTab !== 'settings'" class="p-4 bg-slate-800 text-white rounded-b-3xl shadow-lg mb-4">
+        <div class="text-slate-400 text-sm">目前總資產 (全家人)</div>
         <div class="text-4xl font-bold my-2">{{ formatMoney(totalAssets) }}</div>
         <div class="flex gap-2 mt-4 overflow-x-auto pb-2 no-scrollbar">
             <div v-for="(balance, acc) in accountBalances" :key="acc" class="bg-slate-700 px-3 py-2 rounded-lg min-w-[120px] flex-shrink-0">
@@ -45,7 +58,7 @@
 
     <div v-if="currentTab === 'list'" class="flex-1 overflow-y-auto px-4 pb-20">
         <div v-if="transactions.length === 0" class="text-center text-gray-400 mt-10">
-            目前沒有資料，快去記一筆吧！
+            目前沒有資料，或正在讀取中...
         </div>
         <div v-for="(tx, index) in sortedTransactions" :key="index" class="bg-white border-b border-gray-100 py-3 flex items-center justify-between">
             <div class="flex items-center gap-3">
@@ -62,8 +75,10 @@
                 <div class="font-bold text-lg" :class="tx.amount >= 0 ? 'text-green-600' : 'text-red-600'">
                     {{ formatMoney(tx.amount) }}
                 </div>
-                <button @click="deleteTransaction(index)" class="text-xs text-red-400 underline mt-1">刪除</button>
             </div>
+        </div>
+        <div class="text-center text-xs text-gray-400 mt-4 mb-8">
+            欲刪除或修改資料，請直接編輯 Google Sheet<br>(確保資料安全)
         </div>
     </div>
 
@@ -109,7 +124,7 @@
             </div>
 
             <button @click="addTransaction" class="w-full bg-slate-800 text-white py-4 rounded-lg text-lg font-bold shadow-lg mt-4 active:bg-slate-900">
-                確認儲存
+                儲存到雲端
             </button>
         </div>
     </div>
@@ -119,13 +134,11 @@
             <h3 class="font-bold text-gray-700 mb-4 text-center">資產分佈 (帳戶餘額)</h3>
             <canvas id="assetChart"></canvas>
         </div>
-        <div class="text-center text-sm text-gray-500">圖表將隨資料自動更新</div>
     </div>
 
     <div v-if="currentTab === 'settings'" class="px-4 pb-20">
-        <h2 class="text-xl font-bold mb-4 text-gray-700 mt-4">選項設定</h2>
-        <p class="text-sm text-gray-500 mb-4">在此新增或刪除下拉選單的項目。</p>
-
+        <h2 class="text-xl font-bold mb-4 text-gray-700 mt-4">選項設定 (同步至雲端)</h2>
+        
         <div v-for="(list, key) in optionLabels" :key="key" class="mb-6 bg-white p-4 rounded-lg shadow-sm border">
             <h3 class="font-bold text-slate-700 mb-2 border-b pb-2">{{ list.title }}</h3>
             <div class="flex flex-wrap gap-2 mb-3">
@@ -139,48 +152,49 @@
                 <button @click="addItem(key)" class="bg-slate-700 text-white px-4 py-2 rounded text-sm">新增</button>
             </div>
         </div>
-
-        <div class="mt-8 p-4 bg-red-50 border border-red-100 rounded-lg">
-            <h3 class="text-red-800 font-bold mb-2">危險區域</h3>
-            <button @click="resetAllData" class="w-full bg-red-500 text-white py-2 rounded hover:bg-red-600 transition">
-                清除所有資料與設定 (重置)
-            </button>
-        </div>
+        
+        <button @click="saveOptionsToCloud" class="w-full bg-blue-600 text-white py-3 rounded-lg font-bold mb-8">
+            儲存設定變更
+        </button>
     </div>
 
 </div>
 
 <script>
+    // ==========================================
+    // 請在這裡貼上你的 Google Apps Script 網址
+    // ==========================================
+    const GAS_URL = "https://script.google.com/macros/s/AKfycbyzm0YIaIn3wg9ethT2gecbamUzFRCrTUEv9QpES5RF6hAcHYvaTL1Z7M5s7YVLzOl5/exec"; 
+    // 例如: "https://script.google.com/macros/s/xxxxxxxxx/exec"
+
+
     const { createApp } = Vue;
 
     createApp({
         data() {
             return {
+                isLoading: false,
                 currentTab: 'list',
-                // 選項資料 (預設值)
+                // 預設選項 (若雲端沒資料會用這個)
                 options: {
                     users: ['lowson', 'wisdom'],
                     accounts: ['現金', '中信薪轉帳戶', '彰銀房貸帳戶', '富邦cube信用卡'],
                     categories: ['餐飲支出', '提款轉帳', '薪資獎金']
                 },
-                // 設定頁面顯示用
                 optionLabels: {
                     users: { title: '使用者' },
                     accounts: { title: '帳戶' },
                     categories: { title: '交易類別' }
                 },
-                // 設定頁面輸入框暫存
                 tempInput: { users: '', accounts: '', categories: '' },
                 
-                // 交易資料
                 transactions: [],
                 
-                // 新增交易表單 (預設值已更新)
                 newTx: {
                     date: new Date().toISOString().split('T')[0],
-                    user: 'wisdom',       // 預設改為 wisdom
-                    account: '現金',      // 預設改為 現金
-                    category: '餐飲支出', // 預設改為 餐飲支出
+                    user: 'wisdom',
+                    account: '現金',
+                    category: '餐飲支出',
                     amount: null,
                     note: ''
                 },
@@ -196,9 +210,7 @@
             },
             accountBalances() {
                 const bals = {};
-                // 確保所有設定中的帳戶都顯示，即使餘額為 0
                 this.options.accounts.forEach(acc => bals[acc] = 0);
-                
                 this.transactions.forEach(t => {
                     bals[t.account] = (bals[t.account] || 0) + t.amount;
                 });
@@ -206,39 +218,10 @@
             }
         },
         mounted() {
-            // 1. 讀取資料
-            const savedData = localStorage.getItem('accounting_data');
-            if (savedData) {
-                this.transactions = JSON.parse(savedData);
-            } else {
-                // 若完全無資料，載入範例資料 (可選)
-                this.transactions = this.getInitialData();
-            }
-
-            // 2. 讀取自定義選項
-            const savedOptions = localStorage.getItem('accounting_options');
-            if (savedOptions) {
-                this.options = JSON.parse(savedOptions);
-            }
-
-            this.renderChart();
+            // App 啟動時讀取雲端資料
+            this.fetchData();
         },
         watch: {
-            transactions: {
-                deep: true,
-                handler() {
-                    localStorage.setItem('accounting_data', JSON.stringify(this.transactions));
-                    this.renderChart();
-                }
-            },
-            options: {
-                deep: true,
-                handler() {
-                    localStorage.setItem('accounting_options', JSON.stringify(this.options));
-                    // 選項變更可能會影響圖表標籤，重繪
-                    this.renderChart();
-                }
-            },
             currentTab(val) {
                 if (val === 'chart') {
                     this.$nextTick(() => this.renderChart());
@@ -249,91 +232,104 @@
             formatMoney(val) {
                 return '$' + val.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
             },
-            getInitialData() {
-                return [
-                    { date: '2025-11-05', user: 'lowson', account: '現金', category: '餐飲支出', amount: -100, note: '吃上飽' },
-                    { date: '2025-11-03', user: 'lowson', account: '中信薪轉帳戶', category: '薪資獎金', amount: 200000, note: '10月薪資' }
-                ];
+            
+            // --- 核心功能：讀取資料 ---
+            fetchData() {
+                if(GAS_URL.includes("你的_GOOGLE")) {
+                    alert("請先修改程式碼中的 GAS_URL 為你的部署網址！");
+                    return;
+                }
+                this.isLoading = true;
+                fetch(GAS_URL)
+                    .then(response => response.json())
+                    .then(data => {
+                        this.transactions = data.transactions;
+                        if (data.options) {
+                            this.options = data.options;
+                        }
+                        this.renderChart();
+                        this.isLoading = false;
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        alert("讀取失敗，請檢查網路或網址設定");
+                        this.isLoading = false;
+                    });
             },
+
+            // --- 核心功能：新增資料 ---
             addTransaction() {
                 if (!this.newTx.amount) return alert('請輸入金額');
                 
-                this.transactions.push({ ...this.newTx });
+                this.isLoading = true;
+                // 使用 sendBeacon 比較快，但為了確保成功我們用 fetch POST
+                const payload = { ...this.newTx };
                 
-                // 記帳後重置金額，保留日期與其他選項方便連續記帳
-                this.newTx.amount = null;
-                this.newTx.note = '';
-                
-                alert('記帳成功！');
-                this.currentTab = 'list';
+                fetch(GAS_URL, {
+                    method: 'POST',
+                    mode: 'no-cors', // 重要：避免跨域錯誤，但會拿不到回傳值
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'add_tx', payload: payload })
+                }).then(() => {
+                    // 因為 no-cors 拿不到回傳，我們假設成功並直接更新本地畫面
+                    this.transactions.push(payload); 
+                    this.newTx.amount = null;
+                    this.newTx.note = '';
+                    alert('記帳成功！(已背景同步)');
+                    this.currentTab = 'list';
+                    this.isLoading = false;
+                    // 為了保險，稍後偷偷重新整理一次
+                    setTimeout(() => this.fetchData(), 1000); 
+                }).catch(err => {
+                    alert('連線錯誤');
+                    this.isLoading = false;
+                });
             },
-            deleteTransaction(index) {
-                if (confirm('確定要刪除這筆紀錄嗎？')) {
-                    const txToDelete = this.sortedTransactions[index];
-                    const originalIndex = this.transactions.indexOf(txToDelete);
-                    if(originalIndex > -1) this.transactions.splice(originalIndex, 1);
-                }
-            },
-            // --- 設定頁面功能 ---
+
+            // --- 設定功能 ---
             addItem(key) {
                 const val = this.tempInput[key].trim();
                 if (!val) return;
                 if (this.options[key].includes(val)) return alert('該項目已存在');
-                
                 this.options[key].push(val);
-                this.tempInput[key] = ''; // 清空輸入框
+                this.tempInput[key] = ''; 
             },
             removeItem(key, idx) {
-                if (confirm('確定要刪除此選項嗎？(不會影響已建立的交易紀錄)')) {
+                if (confirm('確定要刪除此選項嗎？')) {
                     this.options[key].splice(idx, 1);
                 }
             },
-            resetAllData() {
-                if(confirm('警告：這將會刪除所有記帳資料與設定，無法復原！確定嗎？')) {
-                    localStorage.removeItem('accounting_data');
-                    localStorage.removeItem('accounting_options');
-                    location.reload();
-                }
+            saveOptionsToCloud() {
+                this.isLoading = true;
+                fetch(GAS_URL, {
+                    method: 'POST',
+                    mode: 'no-cors',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'update_options', payload: this.options })
+                }).then(() => {
+                    alert("設定已更新至雲端！");
+                    this.isLoading = false;
+                });
             },
-            // ------------------
+
+            // --- 樣式與圖表 ---
             getCategoryColor(cat) {
                 if (cat.includes('支出') || cat.includes('費') || cat.includes('水電')) return 'bg-red-400';
                 if (cat.includes('薪資') || cat.includes('收入') || cat.includes('獎金')) return 'bg-green-500';
                 return 'bg-blue-400';
             },
-            exportCSV() {
-                let csvContent = "data:text/csv;charset=utf-8,\uFEFF"; 
-                csvContent += "日期,使用者,帳戶,類別,金額,備註\n";
-                this.transactions.forEach(row => {
-                    csvContent += `${row.date},${row.user},${row.account},${row.category},${row.amount},${row.note}\n`;
-                });
-                const encodedUri = encodeURI(csvContent);
-                const link = document.createElement("a");
-                link.setAttribute("href", encodedUri);
-                link.setAttribute("download", "記帳備份.csv");
-                document.body.appendChild(link);
-                link.click();
-            },
             renderChart() {
                 const ctx = document.getElementById('assetChart');
                 if (!ctx) return;
-
-                // 過濾掉餘額為 0 的帳戶 (讓圖表好看一點)
                 const labels = Object.keys(this.accountBalances).filter(k => this.accountBalances[k] !== 0);
                 const data = labels.map(k => this.accountBalances[k]);
                 const colors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#6366f1', '#8b5cf6', '#ec4899'];
-
                 if (this.chartInstance) this.chartInstance.destroy();
-
                 this.chartInstance = new Chart(ctx, {
                     type: 'doughnut',
                     data: {
                         labels: labels,
-                        datasets: [{
-                            data: data,
-                            backgroundColor: colors,
-                            hoverOffset: 4
-                        }]
+                        datasets: [{ data: data, backgroundColor: colors, hoverOffset: 4 }]
                     }
                 });
             }
