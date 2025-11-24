@@ -5,23 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>SmartLedger 記帳 App</title>
     
-    <!-- PWA 相關設定 -->
     <meta name="theme-color" content="#2563eb">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/2382/2382533.png">
     <link rel="icon" type="image/png" href="https://cdn-icons-png.flaticon.com/512/2382/2382533.png">
 
-    <!-- 載入核心函式庫 (CDN) -->
+    <!-- React & ReactDOM -->
     <script src="https://unpkg.com/react@18.2.0/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js" crossorigin></script>
     
-    <!-- 修正 1: 加入 prop-types 依賴 -->
-    <script src="https://unpkg.com/prop-types/prop-types.min.js"></script>
+    <!-- Chart.js (更穩定強大的圖表庫) -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     
-    <!-- 修正 2: 鎖定 Recharts 穩定版本 (2.12.7) -->
-    <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.min.js"></script>
-    
+    <!-- 其他工具 -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
@@ -39,7 +36,42 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useMemo } = React;
+        const { useState, useEffect, useMemo, useRef } = React;
+
+        // --- Chart.js 封裝元件 ---
+        const ChartComponent = ({ type, data, options }) => {
+            const canvasRef = useRef(null);
+            const chartRef = useRef(null);
+
+            useEffect(() => {
+                if (!canvasRef.current) return;
+
+                // 銷毀舊圖表
+                if (chartRef.current) {
+                    chartRef.current.destroy();
+                }
+
+                // 建立新圖表
+                const ctx = canvasRef.current.getContext('2d');
+                chartRef.current = new Chart(ctx, {
+                    type: type,
+                    data: data,
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        ...options
+                    }
+                });
+
+                return () => {
+                    if (chartRef.current) {
+                        chartRef.current.destroy();
+                    }
+                };
+            }, [type, data, options]);
+
+            return <div style={{ position: 'relative', height: '100%', width: '100%' }}><canvas ref={canvasRef} /></div>;
+        };
 
         // --- 圖示元件 ---
         const Icon = ({ path, className, size = 20 }) => (
@@ -110,15 +142,6 @@
             );
         };
 
-        // --- 修正 3: 安全圖表載入元件 (ChartLoader) ---
-        // 確保 Recharts 載入完成後才渲染，避免 undefined 錯誤
-        const ChartLoader = ({ children, recharts }) => {
-            if (!recharts) {
-                return <div className="h-full w-full flex items-center justify-center bg-gray-50 rounded text-gray-400 text-sm animate-pulse">圖表模組載入中...</div>;
-            }
-            return children(recharts);
-        };
-
         function App() {
             const [activeTab, setActiveTab] = useState('dashboard');
             const [transactions, setTransactions] = useState([]);
@@ -127,31 +150,11 @@
             const [apiUrl, setApiUrl] = useState('');
             const [isSyncing, setIsSyncing] = useState(false);
             const [dashboardUser, setDashboardUser] = useState('所有使用者');
-            
-            // State for Recharts library
-            const [rechartsLib, setRechartsLib] = useState(null);
 
             const [formData, setFormData] = useState({
                 user: 'Wisdom', type: '支出', account: '', toAccount: '', category: '', 
                 assetName: '', assetQty: '', assetPrice: '', amount: '', note: ''
             });
-
-            // 偵測 Recharts 載入 (修正載入中問題)
-            useEffect(() => {
-                // 如果已經有 window.Recharts，直接設定
-                if (window.Recharts) {
-                    setRechartsLib(window.Recharts);
-                } else {
-                    // 否則輪詢直到載入
-                    const checkInterval = setInterval(() => {
-                        if (window.Recharts) {
-                            setRechartsLib(window.Recharts);
-                            clearInterval(checkInterval);
-                        }
-                    }, 500);
-                    return () => clearInterval(checkInterval);
-                }
-            }, []);
 
             // 初始化
             useEffect(() => {
@@ -308,6 +311,48 @@
                 return { income, expense, balances, assetReport, categoryData, trendData };
             }, [transactions, options, dashboardUser, assetPrices]);
 
+            const renderCharts = () => {
+                // Prepare Data for Chart.js
+                const pieData = {
+                    labels: stats.categoryData.map(d => d.name),
+                    datasets: [{
+                        data: stats.categoryData.map(d => d.value),
+                        backgroundColor: COLORS,
+                        borderWidth: 1
+                    }]
+                };
+
+                const barData = {
+                    labels: stats.trendData.map(d => d.name),
+                    datasets: [
+                        { label: '收入', data: stats.trendData.map(d => d.income), backgroundColor: '#00C49F' },
+                        { label: '支出', data: stats.trendData.map(d => d.expense), backgroundColor: '#FF8042' },
+                        { label: '投資投入', data: stats.trendData.map(d => d.assets), backgroundColor: '#8884d8' }
+                    ]
+                };
+
+                const options = { responsive: true, maintainAspectRatio: false };
+
+                return (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 h-80">
+                            <h3 className="text-lg font-bold mb-2">本月支出類別</h3>
+                            {stats.categoryData.length > 0 ? 
+                                <ChartComponent type="pie" data={pieData} options={options} /> : 
+                                <div className="h-full flex items-center justify-center text-gray-400">尚無資料</div>
+                            }
+                        </div>
+                        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 h-80">
+                            <h3 className="text-lg font-bold mb-2 flex items-center"><Icons.TrendingUp className="mr-2" /> 收支資產趨勢</h3>
+                            {stats.trendData.length > 0 ? 
+                                <ChartComponent type="bar" data={barData} options={options} /> : 
+                                <div className="h-full flex items-center justify-center text-gray-400">尚無資料</div>
+                            }
+                        </div>
+                    </div>
+                );
+            };
+
             const renderDashboard = () => (
                 <div className="space-y-6 pb-20 animate-fade-in px-4">
                     <div className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 flex items-center gap-2">
@@ -332,33 +377,7 @@
                             ))}
                         </div>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 h-80">
-                            <h3 className="text-lg font-bold mb-2">本月支出類別</h3>
-                            <ChartLoader recharts={rechartsLib}>
-                                {({ PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer }) => (
-                                    <ResponsiveContainer width="100%" height="100%">
-                                        {stats.categoryData.length > 0 ? (
-                                            <PieChart><Pie data={stats.categoryData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label>{stats.categoryData.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}</Pie><Tooltip formatter={(value) => formatCurrency(value)} /><Legend /></PieChart>
-                                        ) : <div className="flex items-center justify-center h-full text-gray-400">尚無資料</div>}
-                                    </ResponsiveContainer>
-                                )}
-                            </ChartLoader>
-                        </div>
-                        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 h-80">
-                            <h3 className="text-lg font-bold mb-2 flex items-center"><Icons.TrendingUp className="mr-2" /> 收支資產趨勢</h3>
-                            <ChartLoader recharts={rechartsLib}>
-                                {({ BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer }) => (
-                                    <ResponsiveContainer width="100%" height="100%">
-                                        <BarChart data={stats.trendData}>
-                                            <CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" /><YAxis hide /><Tooltip formatter={(value) => formatCurrency(value)} /><Legend />
-                                            <Bar dataKey="income" name="收入" fill="#00C49F" stackId="a" /><Bar dataKey="expense" name="支出" fill="#FF8042" stackId="a" /><Bar dataKey="assets" name="投資投入" fill="#8884d8" />
-                                        </BarChart>
-                                    </ResponsiveContainer>
-                                )}
-                            </ChartLoader>
-                        </div>
-                    </div>
+                    {renderCharts()}
                 </div>
             );
 
