@@ -38,7 +38,7 @@
         const { useState, useEffect, useMemo, useRef } = React;
 
         // --- Chart.js 封裝 ---
-        const ChartComponent = ({ type, data, options, height = 300 }) => {
+        const ChartComponent = ({ type, data, options }) => {
             const canvasRef = useRef(null);
             const chartRef = useRef(null);
 
@@ -60,7 +60,7 @@
                 return () => { if (chartRef.current) chartRef.current.destroy(); };
             }, [type, data, options]);
 
-            return <div style={{ position: 'relative', height: height, width: '100%' }}><canvas ref={canvasRef} /></div>;
+            return <div style={{ position: 'relative', height: '100%', width: '100%' }}><canvas ref={canvasRef} /></div>;
         };
 
         // --- Icons ---
@@ -87,13 +87,13 @@
         const DEFAULT_OPTIONS = {
             users: ['Wisdom', 'Lowson'],
             types: ['收入', '支出', '提款轉帳', '資產投資'],
+            accountCategories: ['現金', '活存帳戶', '信用卡', '資產帳戶', '勞退帳戶'], // 新增欄位選項
             accounts: ['現金', '中信薪轉帳戶', '彰銀房貸帳戶', '永豐股票帳戶', '凱基債劵帳戶', '永豐債劵帳戶'],
             incomeCategories: ['薪資獎金', '股票股利', '債卷配息', '其他收入'],
             expenseCategories: ['餐飲支出', '水電瓦斯', '生活用品', '休閒旅遊', '醫療保險', '交通通勤'],
             transferCategories: ['提款', '轉帳', '繳卡費', '繳貸款'],
             assets: ['00937B', '00945B', '00953B', '00981B', '0050'],
         };
-        // 擴充顏色庫以應付更多類別堆疊
         const COLORS = [
             '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', 
             '#ec4899', '#6366f1', '#14b8a6', '#f97316', '#06b6d4',
@@ -147,7 +147,9 @@
             const [dashboardUser, setDashboardUser] = useState('所有使用者');
 
             const [formData, setFormData] = useState({
-                user: 'Wisdom', type: '支出', account: '', toAccount: '', category: '', 
+                user: 'Wisdom', type: '支出', 
+                accountCategory: '現金', // 新增欄位預設值
+                account: '', toAccount: '', category: '', 
                 assetName: '', assetQty: '', assetPrice: '', amount: '', note: ''
             });
 
@@ -158,7 +160,13 @@
                 const savedOptions = localStorage.getItem('pwa_options');
                 if (savedOptions) {
                     const parsed = JSON.parse(savedOptions);
-                    setOptions(prev => ({ ...prev, ...parsed, types: parsed.types || DEFAULT_OPTIONS.types }));
+                    // 確保 accountCategories 存在 (針對舊資料相容)
+                    setOptions(prev => ({ 
+                        ...prev, 
+                        ...parsed, 
+                        types: parsed.types || DEFAULT_OPTIONS.types,
+                        accountCategories: parsed.accountCategories || DEFAULT_OPTIONS.accountCategories 
+                    }));
                 }
                 const savedPrices = localStorage.getItem('pwa_asset_prices');
                 if (savedPrices) setAssetPrices(JSON.parse(savedPrices));
@@ -244,10 +252,20 @@
             const handleAddOption = (key, value) => setOptions(prev => ({ ...prev, [key]: [...prev[key], value] }));
 
             const downloadExcel = () => {
+                // 更新 Excel 欄位順序，包含帳戶類別
                 const data = transactions.map(row => ({
-                    "日期": row.date, "使用者": row.user, "交易方式": row.type, "轉出/支出帳戶": row.account,
-                    "轉入帳戶": row.toAccount || '', "交易類別": row.category, "資產名稱": row.assetName || '',
-                    "數量": row.assetQty || '', "單價": row.assetPrice || '', "金額": row.amount, "備註": row.note || ''
+                    "日期": row.date, 
+                    "使用者": row.user, 
+                    "交易方式": row.type, 
+                    "帳戶類別": row.accountCategory || '現金',
+                    "轉出/支出/資產帳戶": row.account,
+                    "轉入帳戶": row.toAccount || '', 
+                    "交易類別": row.category, 
+                    "資產名稱": row.assetName || '',
+                    "數量": row.assetQty || '', 
+                    "單價": row.assetPrice || '', 
+                    "金額": row.amount, 
+                    "備註": row.note || ''
                 }));
                 const worksheet = XLSX.utils.json_to_sheet(data);
                 const workbook = XLSX.utils.book_new();
@@ -255,20 +273,17 @@
                 XLSX.writeFile(workbook, `SmartLedger_Data_${new Date().toISOString().slice(0,10)}.xlsx`);
             };
 
-            // 統計資料計算 (包含圖表資料準備)
             const stats = useMemo(() => {
                 const currentMonth = new Date().toISOString().slice(0, 7);
                 let income = 0, expense = 0, balances = {}, assets = {};
                 
-                // 圖表資料結構
-                let categoryStatsIncome = {}; // 當月收入類別
-                let categoryStatsExpense = {}; // 當月支出類別
-                let monthlyIncomeStacks = {}; // 月度收入堆疊 { 'YYYY-MM': { 'Salary': 1000, 'Bonus': 500 } }
-                let monthlyExpenseStacks = {}; // 月度支出堆疊
-                let yearlyIncomeStacks = {}; // 年度收入堆疊
-                let yearlyExpenseStacks = {}; // 年度支出堆疊
+                let categoryStatsIncome = {}; 
+                let categoryStatsExpense = {}; 
+                let monthlyIncomeStacks = {}; 
+                let monthlyExpenseStacks = {}; 
+                let yearlyIncomeStacks = {}; 
+                let yearlyExpenseStacks = {}; 
                 
-                // 收集所有可能的類別以便生成 Dataset
                 let allIncomeCats = new Set();
                 let allExpenseCats = new Set();
 
@@ -277,8 +292,6 @@
 
                 const filteredTransactions = dashboardUser === '所有使用者' ? transactions : transactions.filter(t => t.user === dashboardUser);
 
-                // 資料遍歷 (時間序：舊 -> 新，方便累加餘額，但圖表需要年月分組)
-                // 先排序確保時序正確
                 const sortedTxs = [...filteredTransactions].sort((a,b) => a.date.localeCompare(b.date));
 
                 sortedTxs.forEach(tx => {
@@ -286,7 +299,6 @@
                     const year = tx.date.slice(0, 4);
                     const amount = Number(tx.amount);
 
-                    // 1. 餘額與資產計算
                     if (tx.type === '收入') {
                         balances[tx.account] = (balances[tx.account] || 0) + amount;
                     } else if (tx.type === '支出') {
@@ -295,14 +307,12 @@
                         balances[tx.account] = (balances[tx.account] || 0) - amount;
                         balances[tx.toAccount] = (balances[tx.toAccount] || 0) + amount;
                     } else if (tx.type === '資產投資') {
-                        // 修正：資產投資視為該資產帳戶價值增加 (正值)
                         balances[tx.account] = (balances[tx.account] || 0) + amount;
                         if(!assets[tx.assetName]) assets[tx.assetName] = { qty: 0, cost: 0 };
                         assets[tx.assetName].qty += Number(tx.assetQty);
                         assets[tx.assetName].cost += amount;
                     }
 
-                    // 2. 當月收支統計 (Card & Pie Chart)
                     if (month === currentMonth) {
                         if (tx.type === '收入') {
                             income += amount;
@@ -313,22 +323,16 @@
                         }
                     }
 
-                    // 3. 月度堆疊資料收集
                     if (tx.type === '收入') {
                         allIncomeCats.add(tx.category);
                         if (!monthlyIncomeStacks[month]) monthlyIncomeStacks[month] = {};
                         monthlyIncomeStacks[month][tx.category] = (monthlyIncomeStacks[month][tx.category] || 0) + amount;
-                        
-                        // 年度
                         if (!yearlyIncomeStacks[year]) yearlyIncomeStacks[year] = {};
                         yearlyIncomeStacks[year][tx.category] = (yearlyIncomeStacks[year][tx.category] || 0) + amount;
-
                     } else if (tx.type === '支出') {
                         allExpenseCats.add(tx.category);
                         if (!monthlyExpenseStacks[month]) monthlyExpenseStacks[month] = {};
                         monthlyExpenseStacks[month][tx.category] = (monthlyExpenseStacks[month][tx.category] || 0) + amount;
-
-                        // 年度
                         if (!yearlyExpenseStacks[year]) yearlyExpenseStacks[year] = {};
                         yearlyExpenseStacks[year][tx.category] = (yearlyExpenseStacks[year][tx.category] || 0) + amount;
                     }
@@ -344,7 +348,6 @@
                     return { name, qty, cost, value, profit, profitRate, isRealTime, currentPrice };
                 }).filter(a => a.qty > 0);
 
-                // 準備圖表數據結構
                 const sortedMonths = Object.keys({...monthlyIncomeStacks, ...monthlyExpenseStacks}).sort();
                 const sortedYears = Object.keys({...yearlyIncomeStacks, ...yearlyExpenseStacks}).sort();
                 
@@ -367,26 +370,18 @@
                     plugins: { legend: { position: 'bottom' } }
                 };
 
-                // 1. 當月收入 & 支出圓餅圖
                 const pieOptions = { ...commonOptions, plugins: { legend: { position: 'right' } } };
                 
                 const incomePieData = {
                     labels: Object.keys(stats.categoryStatsIncome),
-                    datasets: [{
-                        data: Object.values(stats.categoryStatsIncome),
-                        backgroundColor: COLORS, borderWidth: 1
-                    }]
+                    datasets: [{ data: Object.values(stats.categoryStatsIncome), backgroundColor: COLORS, borderWidth: 1 }]
                 };
                 
                 const expensePieData = {
                     labels: Object.keys(stats.categoryStatsExpense),
-                    datasets: [{
-                        data: Object.values(stats.categoryStatsExpense),
-                        backgroundColor: COLORS, borderWidth: 1
-                    }]
+                    datasets: [{ data: Object.values(stats.categoryStatsExpense), backgroundColor: COLORS, borderWidth: 1 }]
                 };
 
-                // 2. 月度收入堆疊
                 const monthlyIncomeData = {
                     labels: stats.sortedMonths,
                     datasets: stats.allIncomeCats.map((cat, i) => ({
@@ -396,7 +391,6 @@
                     }))
                 };
 
-                // 3. 月度支出堆疊
                 const monthlyExpenseData = {
                     labels: stats.sortedMonths,
                     datasets: stats.allExpenseCats.map((cat, i) => ({
@@ -406,7 +400,6 @@
                     }))
                 };
 
-                // 4. 年度收支堆疊
                 const yearlyIncomeData = {
                     labels: stats.sortedYears,
                     datasets: stats.allIncomeCats.map((cat, i) => ({
@@ -426,23 +419,16 @@
 
                 return (
                     <div className="space-y-6">
-                        {/* 1. 當月圓餅圖 */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 h-80">
                                 <h3 className="text-lg font-bold mb-2 text-gray-700">當月收入分佈</h3>
-                                {Object.keys(stats.categoryStatsIncome).length > 0 ? 
-                                    <ChartComponent type="pie" data={incomePieData} options={pieOptions} /> : 
-                                    <div className="h-full flex items-center justify-center text-gray-400">尚無收入資料</div>}
+                                {Object.keys(stats.categoryStatsIncome).length > 0 ? <ChartComponent type="pie" data={incomePieData} options={pieOptions} /> : <div className="h-full flex items-center justify-center text-gray-400">尚無收入資料</div>}
                             </div>
                             <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 h-80">
                                 <h3 className="text-lg font-bold mb-2 text-gray-700">當月支出分佈</h3>
-                                {Object.keys(stats.categoryStatsExpense).length > 0 ? 
-                                    <ChartComponent type="pie" data={expensePieData} options={pieOptions} /> : 
-                                    <div className="h-full flex items-center justify-center text-gray-400">尚無支出資料</div>}
+                                {Object.keys(stats.categoryStatsExpense).length > 0 ? <ChartComponent type="pie" data={expensePieData} options={pieOptions} /> : <div className="h-full flex items-center justify-center text-gray-400">尚無支出資料</div>}
                             </div>
                         </div>
-
-                        {/* 2 & 3. 月度趨勢 */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 h-80">
                                 <h3 className="text-lg font-bold mb-2 text-gray-700">月度收入趨勢 (類別堆疊)</h3>
@@ -453,8 +439,6 @@
                                 <ChartComponent type="bar" data={monthlyExpenseData} options={stackedOptions} />
                             </div>
                         </div>
-
-                        {/* 4. 年度趨勢 */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 h-80">
                                 <h3 className="text-lg font-bold mb-2 text-gray-700">年度收入統計</h3>
@@ -484,10 +468,8 @@
                         <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100"><p className="text-gray-500 text-sm">本月支出</p><p className="text-2xl font-bold text-red-500">{formatCurrency(stats.expense)}</p></div>
                     </div>
 
-                    {/* 圖表區 (放在餘額上方) */}
                     {renderCharts()}
 
-                    {/* 帳戶餘額 (放在最下方) */}
                     <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
                         <h3 className="text-lg font-bold mb-3 flex items-center text-gray-800"><Icons.Wallet className="mr-2" /> 帳戶餘額 ({dashboardUser})</h3>
                         <div className="space-y-2">
@@ -509,6 +491,9 @@
                             <DynamicSelect label="使用者" value={formData.user} onChange={v => setFormData({...formData, user: v})} options={options.users} onAddOption={v => handleAddOption('users', v)} title="使用者" />
                             <DynamicSelect label="交易方式" value={formData.type} onChange={v => setFormData({...formData, type: v})} options={options.types} onAddOption={v => handleAddOption('types', v)} title="交易方式" />
                         </div>
+
+                        {/* 插入新的帳戶類別選單 */}
+                        <DynamicSelect label="帳戶類別" value={formData.accountCategory} onChange={v => setFormData({...formData, accountCategory: v})} options={options.accountCategories} onAddOption={v => handleAddOption('accountCategories', v)} title="帳戶類別" />
 
                         {formData.type === '收入' && (<><DynamicSelect label="存入帳戶" value={formData.account} onChange={v => setFormData({...formData, account: v})} options={options.accounts} onAddOption={v => handleAddOption('accounts', v)} title="帳戶"/><DynamicSelect label="收入類別" value={formData.category} onChange={v => setFormData({...formData, category: v})} options={options.incomeCategories} onAddOption={v => handleAddOption('incomeCategories', v)} title="收入類別"/></>)}
                         {(formData.type === '支出' || (!['收入','提款轉帳','資產投資'].includes(formData.type))) && (<><DynamicSelect label="支出帳戶" value={formData.account} onChange={v => setFormData({...formData, account: v})} options={options.accounts} onAddOption={v => handleAddOption('accounts', v)} title="帳戶"/><DynamicSelect label="支出類別" value={formData.category} onChange={v => setFormData({...formData, category: v})} options={options.expenseCategories} onAddOption={v => handleAddOption('expenseCategories', v)} title="支出類別"/></>)}
@@ -582,7 +567,6 @@
             return (
                 <div className="min-h-screen bg-gray-50 font-sans text-gray-900 max-w-md mx-auto relative shadow-2xl">
                     <div className="bg-white shadow-sm sticky top-0 z-10 px-4 py-3 flex justify-between items-center">
-                        {/* 修改抬頭與置中 */}
                         <div className="w-full flex justify-center">
                             <h1 className="text-xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">Lowson家庭收支表</h1>
                         </div>
