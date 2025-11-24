@@ -14,6 +14,7 @@
     <script src="https://unpkg.com/react@18.2.0/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/prop-types/prop-types.min.js"></script>
+    <!-- 使用穩定版 Recharts -->
     <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
@@ -111,28 +112,22 @@
             const [apiUrl, setApiUrl] = useState('');
             const [isSyncing, setIsSyncing] = useState(false);
             const [dashboardUser, setDashboardUser] = useState('所有使用者');
-            
-            // State for Recharts library
-            const [rechartsLib, setRechartsLib] = useState(null);
+            const [isRechartsReady, setIsRechartsReady] = useState(false);
 
             const [formData, setFormData] = useState({
                 user: 'Wisdom', type: '支出', account: '', toAccount: '', category: '', 
                 assetName: '', assetQty: '', assetPrice: '', amount: '', note: ''
             });
 
-            // 偵測 Recharts 載入
+            // 嚴格檢查 Recharts 載入狀態
             useEffect(() => {
-                if (window.Recharts) {
-                    setRechartsLib(window.Recharts);
-                } else {
-                    const interval = setInterval(() => {
-                        if (window.Recharts) {
-                            setRechartsLib(window.Recharts);
-                            clearInterval(interval);
-                        }
-                    }, 500);
-                    return () => clearInterval(interval);
-                }
+                const checkRecharts = setInterval(() => {
+                    if (window.Recharts && window.Recharts.PieChart) {
+                        setIsRechartsReady(true);
+                        clearInterval(checkRecharts);
+                    }
+                }, 500);
+                return () => clearInterval(checkRecharts);
             }, []);
 
             // 初始化
@@ -290,11 +285,23 @@
                 return { income, expense, balances, assetReport, categoryData, trendData };
             }, [transactions, options, dashboardUser, assetPrices]);
 
-            // Charts Components (Dynamically Loaded)
+            // 安全圖表渲染
             const renderCharts = () => {
-                if (!rechartsLib) return <div className="h-full flex items-center justify-center text-gray-400 animate-pulse">圖表模組載入中...</div>;
-                
-                const { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } = rechartsLib;
+                if (!isRechartsReady) {
+                    return (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 h-80">
+                            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center justify-center text-gray-400 animate-pulse">
+                                圖表模組載入中...
+                            </div>
+                            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center justify-center text-gray-400 animate-pulse">
+                                圖表模組載入中...
+                            </div>
+                        </div>
+                    );
+                }
+
+                // 直接從 window.Recharts 解構，因為已經確認 ready
+                const { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } = window.Recharts;
 
                 return (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
